@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OKX Web3 DEX USDT 盈亏计算器 (含 Boost 计算、自动刷新与自动交易) 极简版
 // @namespace    http://tampermonkey.net/
-// @version      6.57_AutoUpdate
+// @version      6.58_ReloadRecovery
 // @description  使用订单接口统计 USDT 净差，并使用官方 Boost records 实时同步 Boost 交易量进度
 // @author       Dilemmmmmmma
 // @match        *://web3.okx.com/*
@@ -20,8 +20,6 @@
     let dailyOrderRecordsMap = new Map();
     let activeDailyStatsKey = '';
 
-    let isAutoRefreshing = false;
-    let refreshIntervalId = null;
     let statsIntervalId = null;
     let isAlarmEnabled = false;
     let lastAlarmTime = 0;
@@ -55,6 +53,8 @@
     let sellOrderSyncBackgroundTimerId = null;
     let forceSellBeforeStop = false;
     let stopSyncPromise = null;
+    let autoTradeRecoveryReloads = 0;
+    let isAutoTradeReloading = false;
 
     const LS_KEY_BOOST_DAILY = 'okx_usdt_boost_daily';
     const LS_KEY_BOOST_MULTI = 'okx_usdt_boost_multi';
@@ -62,6 +62,7 @@
     const LS_KEY_DAILY_STATS = 'okx_usdt_daily_order_stats';
     const LS_KEY_BOOST_ACCOUNT_ID = 'okx_usdt_boost_account_id';
     const LS_KEY_BOOST_RECORDS = 'okx_usdt_boost_records';
+    const LS_KEY_AUTO_TRADE_RESUME = 'okx_usdt_auto_trade_resume';
     const BOOST_RECORDS_REFRESH_INTERVAL_MS = 300000;
     const BOOST_RECORDS_PATH = '/priapi/v1/dapp/boost/records';
     const ORDER_HISTORY_PATH = '/priapi/v1/dx/trade/multi/v2/orderHistory';
@@ -82,6 +83,10 @@
     const TRADE_SUBMITTED_STATUS_TIMEOUT_MS = 90000;
     const TRADE_NEXT_STEP_COOLDOWN_MS = 900;
     const TRADE_RETRY_COOLDOWN_MS = 1000;
+    const AUTO_TRADE_RESUME_TTL_MS = 5 * 60 * 1000;
+    const AUTO_TRADE_RELOAD_DELAY_MS = 800;
+    const AUTO_TRADE_RELOAD_RESUME_DELAY_MS = 2500;
+    const MAX_AUTO_TRADE_RELOAD_RECOVERIES = 3;
 
     let lastStats = {
         buy: 0,
@@ -895,6 +900,7 @@
         if (!boostRecordsRefreshIntervalId) {
             boostRecordsRefreshIntervalId = setInterval(refreshBoostRecordsFromCache, BOOST_RECORDS_REFRESH_INTERVAL_MS);
         }
+        resumeAutoTradeAfterReload();
     }
 
     function loadBoostSettings() {
@@ -1860,14 +1866,6 @@
         }
     }
 
-    function stopAutoRefresh() {
-        if (refreshIntervalId) {
-            clearInterval(refreshIntervalId);
-            refreshIntervalId = null;
-        }
-        isAutoRefreshing = false;
-    }
-
     function getReusableAccountId() {
         return cacheBoostAccountId(lastBoostAccountId || window.localStorage.getItem(LS_KEY_BOOST_ACCOUNT_ID));
     }
@@ -2048,6 +2046,109 @@
         status.style.color = officialColorMap[color] || color || '#909090';
     }
 
+    function clearAutoTradeResumeState() {
+        window.localStorage.removeItem(LS_KEY_AUTO_TRADE_RESUME);
+    }
+
+    function readAutoTradeResumeState() {
+        let payload = null;
+        try {
+            payload = JSON.parse(window.localStorage.getItem(LS_KEY_AUTO_TRADE_RESUME) || 'null');
+        } catch (err) {
+            clearAutoTradeResumeState();
+            return null;
+        }
+
+        if (!payload || payload.resume !== true) return null;
+        if (payload.href !== window.location.href) {
+            clearAutoTradeResumeState();
+            return null;
+        }
+
+        const ts = Number(payload.ts) || 0;
+        if (!ts || Date.now() - ts > AUTO_TRADE_RESUME_TTL_MS) {
+            clearAutoTradeResumeState();
+            return null;
+        }
+
+        return payload;
+    }
+
+    function saveAutoTradeResumeState(reason) {
+        const count = autoTradeRecoveryReloads + 1;
+        const payload = {
+            resume: true,
+            href: window.location.href,
+            side: 'sell',
+            forceSellBeforeStop: true,
+            count,
+            reason: reason || '',
+            ts: Date.now()
+        };
+        window.localStorage.setItem(LS_KEY_AUTO_TRADE_RESUME, JSON.stringify(payload));
+        autoTradeRecoveryReloads = count;
+        return payload;
+    }
+
+    function setAutoTradeButtonRunning() {
+        const btn = document.getElementById('btn-auto-trade');
+        if (btn) {
+            btn.textContent = '停止自动交易';
+            btn.style.background = '#351520';
+            btn.style.color = '#fc46ab';
+        }
+    }
+
+    function setAutoTradeButtonStopped() {
+        const btn = document.getElementById('btn-auto-trade');
+        if (btn) {
+            btn.textContent = '开启自动交易';
+            btn.style.background = '#a5ff00';
+            btn.style.color = '#0e0e0e';
+        }
+    }
+
+    function requestAutoTradePageReload(reason) {
+        if (autoTradeRecoveryReloads >= MAX_AUTO_TRADE_RELOAD_RECOVERIES) {
+            clearAutoTradeResumeState();
+            return false;
+        }
+
+        const payload = saveAutoTradeResumeState(reason);
+        isAutoTradeReloading = true;
+        updateAutoTradeStatus(`卖出无反应，刷新网页后继续 (${payload.count}/${MAX_AUTO_TRADE_RELOAD_RECOVERIES})`, '#ff9800');
+
+        if (autoTradeTimerId) {
+            clearTimeout(autoTradeTimerId);
+            autoTradeTimerId = null;
+        }
+
+        window.setTimeout(() => {
+            if (isAutoTradeReloading) window.location.reload();
+        }, AUTO_TRADE_RELOAD_DELAY_MS);
+
+        return true;
+    }
+
+    function resumeAutoTradeAfterReload() {
+        const payload = readAutoTradeResumeState();
+        if (!payload) return false;
+
+        clearAutoTradeResumeState();
+        autoTradeRecoveryReloads = Number(payload.count) || 0;
+        isAutoTrading = true;
+        isAutoTradeReloading = false;
+        autoTradeSide = payload.side === 'buy' ? 'buy' : 'sell';
+        forceSellBeforeStop = payload.forceSellBeforeStop !== false;
+        oneClickTradeOpenAttempted = false;
+        consecutiveTradeFailures = 0;
+        lastSwapFormContainer = null;
+        setAutoTradeButtonRunning();
+        updateAutoTradeStatus('网页已重新加载，继续执行 100% 卖出', '#2196f3');
+        autoTradeTimerId = setTimeout(runAutoTradeLoop, AUTO_TRADE_RELOAD_RESUME_DELAY_MS);
+        return true;
+    }
+
     function getAutoTradeConfig() {
         const buyIndexInput = document.getElementById('buy-option-index');
         let buyOptionIndex = parseInt(buyIndexInput && buyIndexInput.value, 10);
@@ -2071,19 +2172,15 @@
         }
 
         getAutoTradeConfig();
+        clearAutoTradeResumeState();
         isAutoTrading = true;
         autoTradeSide = 'buy';
         oneClickTradeOpenAttempted = false;
         consecutiveTradeFailures = 0;
         forceSellBeforeStop = false;
-        stopAutoRefresh();
-
-        const btn = document.getElementById('btn-auto-trade');
-        if (btn) {
-            btn.textContent = '停止自动交易';
-            btn.style.background = '#351520';
-            btn.style.color = '#fc46ab';
-        }
+        autoTradeRecoveryReloads = 0;
+        isAutoTradeReloading = false;
+        setAutoTradeButtonRunning();
 
         updateAutoTradeStatus('已启动，准备买入', '#4caf50');
         runAutoTradeLoop();
@@ -2092,19 +2189,15 @@
     function stopAutoTrade(reason) {
         const stopReason = reason || '已停止';
         isAutoTrading = false;
-        stopAutoRefresh();
+        isAutoTradeReloading = false;
         forceSellBeforeStop = false;
+        clearAutoTradeResumeState();
         if (autoTradeTimerId) {
             clearTimeout(autoTradeTimerId);
             autoTradeTimerId = null;
         }
 
-        const btn = document.getElementById('btn-auto-trade');
-        if (btn) {
-            btn.textContent = '开启自动交易';
-            btn.style.background = '#a5ff00';
-            btn.style.color = '#0e0e0e';
-        }
+        setAutoTradeButtonStopped();
 
         updateAutoTradeStatus(stopReason, '#ff9800');
         syncDataOnAutoTradeStop(stopReason);
@@ -2407,18 +2500,8 @@
     }
 
     function clickSellButton(button, source) {
-        const rect = button.getBoundingClientRect();
         updateAutoTradeStatus(`找到卖出100%按钮，点击中 (${source})`, '#2196f3');
-        console.log('[USDT计算器] 点击卖出100%候选:', source, getButtonText(button), {
-            className: String(button.className || ''),
-            rect: {
-                left: Math.round(rect.left),
-                top: Math.round(rect.top),
-                width: Math.round(rect.width),
-                height: Math.round(rect.height)
-            }
-        });
-        return triggerRealClick(button);
+        return clickButtonAndRemember(button);
     }
 
     function clickBuyAmountButton() {
@@ -2785,11 +2868,16 @@
         }
 
         if (sideToRun === 'sell' && !success && forceSellBeforeStop) {
-            stopAutoTrade('卖出未确认，已停止，请手动核对仓位');
+            if (requestAutoTradePageReload('强制卖出未确认')) return;
+            stopAutoTrade('卖出多次无反应，请手动核对仓位');
             return;
         }
 
         consecutiveTradeFailures = success ? 0 : consecutiveTradeFailures + 1;
+        if (success) {
+            autoTradeRecoveryReloads = 0;
+            clearAutoTradeResumeState();
+        }
         if (consecutiveTradeFailures >= MAX_CONSECUTIVE_TRADE_FAILURES) {
             forceSellBeforeStop = true;
             autoTradeSide = 'sell';
@@ -2916,7 +3004,10 @@
         return {
             panelCount: panels.length,
             autoTradeSide,
-            isAutoRefreshing,
+            isAutoTrading,
+            forceSellBeforeStop,
+            autoTradeRecoveryReloads,
+            isAutoTradeReloading,
             oneClickTradeOpenAttempted,
             consecutiveTradeFailures,
             orderHistoryAccountId: getReusableAccountId(),
