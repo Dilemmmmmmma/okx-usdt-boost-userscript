@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OKX Web3 DEX USDT 盈亏计算器 (含 Boost 计算、自动刷新与自动交易) 极简版
 // @namespace    http://tampermonkey.net/
-// @version      6.59_SubmitTimeout5s
+// @version      6.60_NextStepCooldown2s
 // @description  使用订单接口统计 USDT 净差，并使用官方 Boost records 实时同步 Boost 交易量进度
 // @author       Dilemmmmmmma
 // @match        *://web3.okx.com/*
@@ -81,7 +81,7 @@
     const MAX_CONSECUTIVE_TRADE_FAILURES = 3;
     const TRADE_STATUS_TIMEOUT_MS = 5000;
     const TRADE_SUBMITTED_STATUS_TIMEOUT_MS = 5000;
-    const TRADE_NEXT_STEP_COOLDOWN_MS = 900;
+    const TRADE_NEXT_STEP_COOLDOWN_MS = 2000;
     const TRADE_RETRY_COOLDOWN_MS = 1000;
     const AUTO_TRADE_RESUME_TTL_MS = 5 * 60 * 1000;
     const AUTO_TRADE_RELOAD_DELAY_MS = 800;
