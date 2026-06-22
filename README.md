@@ -16,3 +16,15 @@ When editing the script, update both places:
 - `OKX-USDT-Boost.user.js`
 
 Every published change must bump the userscript `@version`, otherwise Tampermonkey may not detect the update.
+
+## Publish
+
+Create this GitHub repository first:
+
+https://github.com/new?name=okx-usdt-boost-userscript&visibility=public
+
+Then push from this folder:
+
+```powershell
+git push -u origin main
+```
