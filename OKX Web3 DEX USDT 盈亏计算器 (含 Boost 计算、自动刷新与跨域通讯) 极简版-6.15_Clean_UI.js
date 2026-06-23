@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         OKX Web3 DEX USDT 盈亏计算器 (含 Boost 计算、自动刷新与自动交易) 极简版
 // @namespace    http://tampermonkey.net/
-// @version      6.65_TradeStatsPause
-// @description  使用订单接口统计 USDT 净差，并使用官方 Boost records 实时同步 Boost 交易量进度
+// @version      6.66_FilledVolumeUSDC
+// @description  使用订单接口统计 USDT/USDC 净差，并使用官方 Boost records 实时同步 Boost 交易量进度
 // @author       Dilemmmmmmma
 // @match        *://web3.okx.com/*
 // @match        *://web3.cnouxyex.co/*
@@ -141,6 +141,7 @@
             buy: 0,
             sell: 0,
             total: 0,
+            orderHistoryTotal: 0,
             net: 0,
             boostProgress: 0,
             boostSnapshotCount: 0,
@@ -291,7 +292,7 @@
         return 0;
     }
 
-    function getRecordUsdtVolume(record) {
+    function getRecordStableVolume(record) {
         if (!record) return 0;
         return (parseFloat(record.buy || 0) || 0) + (parseFloat(record.sell || 0) || 0);
     }
@@ -818,14 +819,15 @@
 
             <div class="okx-calc-section">
                 <div class="okx-calc-heading">
-                    <span>USDT 交易统计(Boost榜无返佣)</span>
+                    <span>USDT/USDC 交易统计(Boost榜无返佣)</span>
                     <span id="summary-source-status" class="okx-calc-muted">读取中</span>
                 </div>
                 <div class="okx-calc-row"><span>总交易额</span><span id="usdt-volume" class="okx-calc-value">0.0000</span></div>
+                <div class="okx-calc-row"><span title="订单历史当前 08:00 周期内 USDT/USDC 买入+卖出累计">已刷</span><span id="order-filled-volume" class="okx-calc-value">0.0000</span></div>
                 <div class="okx-calc-row"><span title="-(实际需刷量 × 未加成基础倍数% × (1 - 固定返利20%))">预估手续费</span><span id="usdt-estimated-wear" class="okx-calc-value">--</span></div>
                 <div class="okx-calc-row"><span title="总交易额 / Boost倍数 × (返佣比例 - 固定返利20%) × 未加成基础倍数%">实际返佣</span><span id="usdt-estimated-rebate" class="okx-calc-value">--</span></div>
-                <div class="okx-calc-row"><span>USDT 净差</span><span id="usdt-net" class="okx-calc-value">0.0000</span></div>
-                <div class="okx-calc-row"><span title="USDT净差 + 当前交易量对应的实际返佣">返佣后磨损</span><span id="usdt-rebate-adjusted-wear" class="okx-calc-value">--</span></div>
+                <div class="okx-calc-row"><span>USDT/USDC 净差</span><span id="usdt-net" class="okx-calc-value">0.0000</span></div>
+                <div class="okx-calc-row"><span title="USDT/USDC净差 + 当前交易量对应的实际返佣">返佣后磨损</span><span id="usdt-rebate-adjusted-wear" class="okx-calc-value">--</span></div>
                 <div class="okx-calc-row"><span title="官方 Boost records 今日 tradingVolume / 10；接口异常时回退到本地订单估算">Boost交易量进度</span><span id="boost-weighted-progress" class="okx-calc-value">0.00</span></div>
                 <button id="btn-auto-trade" class="okx-calc-action okx-calc-action-primary">开启自动交易</button>
                 <div id="auto-trade-status" class="okx-calc-status">未启动</div>
@@ -1663,8 +1665,9 @@
             : (numericValue < 0 ? '#fc46ab' : '#e6e6e6');
     }
 
-    function isUsdtToken(token) {
-        return token && String(token.tokenSymbol || '').toUpperCase() === 'USDT';
+    function isStableQuoteToken(token) {
+        const symbol = String(token && token.tokenSymbol || '').toUpperCase();
+        return symbol === 'USDT' || symbol === 'USDC';
     }
 
     function getDailyOrderRecord(order, windowInfo) {
@@ -1675,22 +1678,22 @@
 
         const fromToken = order.fromToken;
         const toToken = order.toToken;
-        let usdtSpent = 0;
-        let usdtGained = 0;
+        let stableSpent = 0;
+        let stableGained = 0;
 
-        if (isUsdtToken(fromToken)) {
-            usdtSpent += parseFloat(fromToken.tokenAmount || 0) || 0;
+        if (isStableQuoteToken(fromToken)) {
+            stableSpent += parseFloat(fromToken.tokenAmount || 0) || 0;
         }
 
-        if (isUsdtToken(toToken)) {
-            usdtGained += parseFloat(toToken.tokenAmount || 0) || 0;
+        if (isStableQuoteToken(toToken)) {
+            stableGained += parseFloat(toToken.tokenAmount || 0) || 0;
         }
 
-        if (usdtSpent <= 0 && usdtGained <= 0) return null;
+        if (stableSpent <= 0 && stableGained <= 0) return null;
         return {
             id: String(order.orderId),
-            buy: usdtSpent,
-            sell: usdtGained,
+            buy: stableSpent,
+            sell: stableGained,
             time: orderTime
         };
     }
@@ -1750,11 +1753,12 @@
             const recordBoostMultiplier = getRecordBoostMultiplier(record);
             if (recordBoostMultiplier > 0) {
                 stats.boostSnapshotCount += 1;
-                stats.boostProgress += getRecordUsdtVolume(record) * recordBoostMultiplier / BOOST_WINDOW_DAYS;
+                stats.boostProgress += getRecordStableVolume(record) * recordBoostMultiplier / BOOST_WINDOW_DAYS;
             }
         });
 
-        stats.total = stats.buy + stats.sell;
+        stats.orderHistoryTotal = stats.buy + stats.sell;
+        stats.total = stats.orderHistoryTotal;
         stats.net = stats.sell - stats.buy;
         if (stats.boostProgress <= 0 && stats.total > 0 && stats.boostSnapshotCount === 0) {
             const currentBoostSnapshot = getCurrentBoostSnapshot();
@@ -1787,6 +1791,7 @@
         const displayStats = getStatsForDisplay(rawStats);
 
         const volumeElement = document.getElementById('usdt-volume');
+        const orderFilledElement = document.getElementById('order-filled-volume');
         const netElement = document.getElementById('usdt-net');
         const estimatedRebateElement = document.getElementById('usdt-estimated-rebate');
         const estimatedWearElement = document.getElementById('usdt-estimated-wear');
@@ -1800,6 +1805,11 @@
             if (volumeElement) {
                 volumeElement.textContent = '--';
                 volumeElement.title = '交易统计已停止';
+            }
+
+            if (orderFilledElement) {
+                orderFilledElement.textContent = '--';
+                orderFilledElement.title = '交易统计已停止';
             }
 
             if (netElement) {
@@ -1854,6 +1864,13 @@
                 : displayStats.boostProgressOfficial
                 ? '官方 Boost records 今日 tradingVolume，未使用 orderHistory 总值'
                 : '订单历史当前 08:00 周期总交易额';
+        }
+
+        if (orderFilledElement) {
+            orderFilledElement.textContent = formatUnsignedAmount(displayStats.orderHistoryTotal, 4);
+            orderFilledElement.title = displayStats.sellSyncPending
+                ? '卖出订单同步中，暂用卖出前的订单历史 USDT/USDC 累计'
+                : '订单历史当前 08:00 周期 USDT/USDC 买入+卖出累计';
         }
 
         if (netElement) {
@@ -1926,7 +1943,7 @@
             sourceElement.title = displayStats.sellSyncPending
                 ? '卖出已确认，等待订单历史接口返回卖出订单'
                 : displayStats.boostProgressOfficial
-                ? `官方 records 更新时间：${displayStats.officialBoostUpdatedAt ? new Date(displayStats.officialBoostUpdatedAt).toLocaleString() : '未知'}；净差仍来自订单历史`
+                ? `官方 records 更新时间：${displayStats.officialBoostUpdatedAt ? new Date(displayStats.officialBoostUpdatedAt).toLocaleString() : '未知'}；已刷和净差来自订单历史 USDT/USDC`
                 : `统计周期：${new Date(windowInfo.startMs).toLocaleString()} - ${new Date(windowInfo.endMs).toLocaleString()}`;
             sourceElement.style.color = displayStats.sellSyncPending
                 ? '#2196f3'
