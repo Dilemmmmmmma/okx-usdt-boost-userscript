@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OKX Web3 DEX USDT 盈亏计算器 (含 Boost 计算、自动刷新与自动交易) 极简版
 // @namespace    http://tampermonkey.net/
-// @version      6.60_NextStepCooldown2s
+// @version      6.61_SidebarFallback
 // @description  使用订单接口统计 USDT 净差，并使用官方 Boost records 实时同步 Boost 交易量进度
 // @author       Dilemmmmmmma
 // @match        *://web3.okx.com/*
@@ -55,6 +55,7 @@
     let stopSyncPromise = null;
     let autoTradeRecoveryReloads = 0;
     let isAutoTradeReloading = false;
+    let activeTradeExecutorMode = 'instant';
 
     const LS_KEY_BOOST_DAILY = 'okx_usdt_boost_daily';
     const LS_KEY_BOOST_MULTI = 'okx_usdt_boost_multi';
@@ -2139,6 +2140,7 @@
         isAutoTrading = true;
         isAutoTradeReloading = false;
         autoTradeSide = payload.side === 'buy' ? 'buy' : 'sell';
+        activeTradeExecutorMode = 'instant';
         forceSellBeforeStop = payload.forceSellBeforeStop !== false;
         oneClickTradeOpenAttempted = false;
         consecutiveTradeFailures = 0;
@@ -2180,6 +2182,7 @@
         forceSellBeforeStop = false;
         autoTradeRecoveryReloads = 0;
         isAutoTradeReloading = false;
+        activeTradeExecutorMode = 'instant';
         setAutoTradeButtonRunning();
 
         updateAutoTradeStatus('已启动，准备买入', '#4caf50');
@@ -2300,6 +2303,10 @@
     }
 
     async function selectTradeTab(side) {
+        if (activeTradeExecutorMode === 'sidebar') {
+            return selectSidebarTradeTab(side);
+        }
+
         const tabText = side === 'buy' ? '买入' : '卖出';
         const tab = findElementByText(tabText, '[role="tab"], button[aria-selected], button[aria-controls]');
         if (!tab) return false;
@@ -2340,6 +2347,84 @@
         }
 
         return false;
+    }
+
+    function findElementByTextInScope(scope, text, selector = 'button, [role="button"], [role="tab"], div, span') {
+        const elements = Array.from((scope || document).querySelectorAll(selector));
+        for (let i = elements.length - 1; i >= 0; i--) {
+            const el = elements[i];
+            if (!isVisible(el)) continue;
+            if (normalizeText(el.innerText || el.textContent) !== text) continue;
+            return el.closest('button, [role="button"], [role="tab"]') || el;
+        }
+        return null;
+    }
+
+    function getSidebarTradePanel() {
+        const ownPanel = document.getElementById('okx-usdt-calculator');
+        const candidates = Array.from(document.querySelectorAll('aside, section, div[class]'))
+            .filter((el) => {
+                if (!el || !isVisible(el) || (ownPanel && (el === ownPanel || ownPanel.contains(el) || el.contains(ownPanel)))) return false;
+
+                const rect = el.getBoundingClientRect();
+                if (rect.width < 240 || rect.height < 260) return false;
+                if (rect.left < Math.max(280, window.innerWidth * 0.42)) return false;
+
+                const text = normalizeText(el.innerText || el.textContent);
+                if (!text.includes('买入') || !text.includes('卖出')) return false;
+                if (!/(市价|限价|拆单|数量|最大|Pilot|动态)/.test(text)) return false;
+
+                return Boolean(findElementByTextInScope(el, '买入')) &&
+                    Boolean(findElementByTextInScope(el, '卖出')) &&
+                    Array.from(el.querySelectorAll('button')).some(isVisible);
+            })
+            .sort((a, b) => {
+                const ra = a.getBoundingClientRect();
+                const rb = b.getBoundingClientRect();
+                return rb.left - ra.left || (rb.width * rb.height) - (ra.width * ra.height);
+            });
+
+        return candidates[0] || null;
+    }
+
+    async function ensureSidebarTradePanelAvailable() {
+        const panel = getSidebarTradePanel();
+        if (!panel) return false;
+        activeTradeExecutorMode = 'sidebar';
+        updateAutoTradeStatus('一键买卖不可用，启用右侧栏兜底', '#ff9800');
+        return true;
+    }
+
+    async function ensureTradeExecutorMode() {
+        if (await ensureInstantTradePanelOpenOnce()) {
+            activeTradeExecutorMode = 'instant';
+            return 'instant';
+        }
+
+        if (await ensureSidebarTradePanelAvailable()) return 'sidebar';
+        return '';
+    }
+
+    async function selectSidebarTradeTab(side) {
+        const panel = getSidebarTradePanel();
+        if (!panel) return false;
+
+        const tabText = side === 'buy' ? '买入' : '卖出';
+        const panelRect = panel.getBoundingClientRect();
+        const tab = Array.from(panel.querySelectorAll('button, [role="button"], [role="tab"], div, span'))
+            .filter(isVisible)
+            .map((element) => ({
+                element: element.closest('button, [role="button"], [role="tab"]') || element,
+                text: normalizeText(element.innerText || element.textContent),
+                rect: element.getBoundingClientRect()
+            }))
+            .filter((item) => item.text === tabText && item.rect.top <= panelRect.top + 120)
+            .sort((a, b) => a.rect.top - b.rect.top || a.rect.left - b.rect.left)[0]?.element || null;
+        if (!tab || isDisabledButton(tab)) return false;
+
+        triggerRealClick(tab);
+        await sleep(350);
+        return true;
     }
 
     function getVisibleOptionGroups() {
@@ -2569,13 +2654,109 @@
         return clickSellButton(exactButton || group.buttons[group.buttons.length - 1], 'fallback-group');
     }
 
-    async function clickTradeAmountButton(side, timeoutMs) {
+    function getSidebarOptionButtons(side) {
+        const panel = getSidebarTradePanel();
+        if (!panel) return [];
+
+        const groups = Array.from(panel.querySelectorAll('.options-wrapper, [class*="options-wrapper"]'))
+            .filter(isVisible)
+            .map((wrapper) => ({
+                wrapper,
+                buttons: Array.from(wrapper.querySelectorAll('button')).filter(isVisible)
+            }))
+            .filter((group) => group.buttons.length > 0)
+            .filter((group) => {
+                const texts = group.buttons.map(getButtonText).filter(Boolean);
+                return side === 'buy'
+                    ? texts.length > 0 && texts.every((text) => !text.includes('%'))
+                    : texts.some((text) => text.includes('%'));
+            });
+
+        const group = groups[groups.length - 1];
+        return group ? group.buttons : [];
+    }
+
+    function clickSidebarBuyAmountButton() {
+        const { buyOptionIndex } = getAutoTradeConfig();
+        const buttons = getSidebarOptionButtons('buy');
+        if (buttons.length === 0) return false;
+
+        const index = Math.min(buyOptionIndex - 1, buttons.length - 1);
+        updateAutoTradeStatus(`右侧栏买入序号 ${index + 1}`, '#2196f3');
+        return triggerRealClick(buttons[index]);
+    }
+
+    function clickSidebarSellAmountButton() {
+        const panel = getSidebarTradePanel();
+        if (!panel) return false;
+
+        const percentButtons = getSidebarOptionButtons('sell');
+        const exactPercent = percentButtons.find((button) => getButtonText(button) === '100%');
+        if (exactPercent || percentButtons.length > 0) {
+            updateAutoTradeStatus('右侧栏点击 100% 卖出数量', '#2196f3');
+            return triggerRealClick(exactPercent || percentButtons[percentButtons.length - 1]);
+        }
+
+        const maxButton = findElementByTextInScope(panel, '最大', 'button, [role="button"], div, span');
+        if (maxButton && !isDisabledButton(maxButton)) {
+            updateAutoTradeStatus('右侧栏点击最大卖出数量', '#2196f3');
+            return triggerRealClick(maxButton);
+        }
+
+        return Boolean(findSidebarSubmitButton('sell'));
+    }
+
+    function findSidebarSubmitButton(side) {
+        const panel = getSidebarTradePanel();
+        if (!panel) return null;
+
+        const sideText = side === 'buy' ? '买入' : '卖出';
+        const panelRect = panel.getBoundingClientRect();
+        return Array.from(panel.querySelectorAll('button, [role="button"]'))
+            .filter(isVisible)
+            .filter((button) => !isDisabledButton(button))
+            .map((button) => ({
+                button,
+                text: getButtonText(button),
+                rect: button.getBoundingClientRect()
+            }))
+            .filter((item) => {
+                if (!item.text.startsWith(sideText)) return false;
+                if (item.text === sideText && item.rect.top <= panelRect.top + 120) return false;
+                return item.rect.width >= 120 && item.rect.height >= 28;
+            })
+            .sort((a, b) => b.rect.width * b.rect.height - a.rect.width * a.rect.height || b.rect.top - a.rect.top)[0]?.button || null;
+    }
+
+    async function clickSidebarSubmitButton(side, timeoutMs) {
+        const deadline = Date.now() + timeoutMs;
+        const sideText = side === 'buy' ? '买入' : '卖出';
+
+        while (isAutoTrading && Date.now() < deadline) {
+            const submitButton = findSidebarSubmitButton(side);
+            if (submitButton) {
+                updateAutoTradeStatus(`右侧栏点击${sideText}按钮`, '#2196f3');
+                return triggerRealClick(submitButton);
+            }
+            await sleep(300);
+        }
+
+        return false;
+    }
+
+    async function clickTradeAmountButton(side, timeoutMs, mode = activeTradeExecutorMode) {
         const deadline = Date.now() + timeoutMs;
 
         while (isAutoTrading && Date.now() < deadline) {
-            const clicked = side === 'buy' ? clickBuyAmountButton() : clickSellAllButton();
+            const clicked = mode === 'sidebar'
+                ? (side === 'buy' ? clickSidebarBuyAmountButton() : clickSidebarSellAmountButton())
+                : (side === 'buy' ? clickBuyAmountButton() : clickSellAllButton());
             if (clicked) return true;
-            await ensureInstantTradePanelOpenOnce();
+            if (mode === 'sidebar') {
+                await selectSidebarTradeTab(side);
+            } else {
+                await ensureInstantTradePanelOpenOnce();
+            }
             await sleep(300);
         }
 
@@ -2586,6 +2767,9 @@
         oneClickTradeOpenAttempted = false;
         lastSwapFormContainer = null;
         await sleep(500);
+        if (activeTradeExecutorMode === 'sidebar') {
+            return Boolean(getSidebarTradePanel());
+        }
         return ensureInstantTradePanelOpenOnce();
     }
 
@@ -2595,7 +2779,7 @@
         if (bodyText.includes('第三方合约执行失败')) {
             const cancelButton = findElementByText('取消') || findElementByText('确定');
             if (cancelButton) triggerRealClick(cancelButton);
-            updateAutoTradeStatus('第三方合约执行失败，重开一键买卖后继续', '#ff9800');
+            updateAutoTradeStatus('第三方合约执行失败，恢复交易入口后继续', '#ff9800');
             await recoverInstantTradePanel();
             return 'contract_failed';
         }
@@ -2760,19 +2944,36 @@
         const requireSummaryChange = side === 'sell' || Boolean(options.requireSummaryChange);
 
         updateAutoTradeStatus(`${label}准备中`, '#2196f3');
-        await ensureInstantTradePanelOpenOnce();
+        const tradeMode = await ensureTradeExecutorMode();
+        if (!tradeMode) {
+            updateAutoTradeStatus('交易入口未找到，一键买卖和右侧栏均不可用', '#ff5252');
+            return false;
+        }
+
         await selectTradeTab(side);
         await sleep(500);
 
-        const beforeTradeStatus = getTradeStatusFlags();
-        const selected = await clickTradeAmountButton(side, 8000);
+        let beforeTradeStatus = getTradeStatusFlags();
+        const selected = await clickTradeAmountButton(side, 8000, tradeMode);
         if (!selected) {
             updateAutoTradeStatus(`${label}金额按钮未找到`, '#ff5252');
             return false;
         }
 
+        if (tradeMode === 'sidebar') {
+            await sleep(500);
+            beforeTradeStatus = getTradeStatusFlags();
+            const submitted = await clickSidebarSubmitButton(side, 8000);
+            if (!submitted) {
+                updateAutoTradeStatus(`右侧栏${label}按钮未找到或未启用`, '#ff5252');
+                return false;
+            }
+        }
+
         updateAutoTradeStatus(
-            side === 'sell' ? '已点击 100%，等待卖出结果' : '已点击买入金额，等待买入结果',
+            tradeMode === 'sidebar'
+                ? (side === 'sell' ? '已点击右侧栏卖出，等待卖出结果' : '已点击右侧栏买入，等待买入结果')
+                : (side === 'sell' ? '已点击 100%，等待卖出结果' : '已点击买入金额，等待买入结果'),
             '#2196f3'
         );
         const tradeResult = await waitForTradeResult(side, beforeTradeStatus);
@@ -2975,6 +3176,13 @@
     };
 
     function getDebugButtonInfo(button, index) {
+        if (!button) {
+            return {
+                index,
+                found: false
+            };
+        }
+
         const rect = button.getBoundingClientRect();
         const centerX = rect.left + rect.width / 2;
         const centerY = rect.top + rect.height / 2;
@@ -3000,10 +3208,17 @@
         const panels = getActiveInstantTradePanels();
         const buyButtons = getPanelOptionButtonsBySide('buy');
         const sellButtons = getPanelOptionButtonsBySide('sell');
+        const sidebarPanel = getSidebarTradePanel();
 
         return {
             panelCount: panels.length,
             autoTradeSide,
+            activeTradeExecutorMode,
+            sidebarPanelFound: Boolean(sidebarPanel),
+            sidebarBuyButtons: getSidebarOptionButtons('buy').map(getDebugButtonInfo),
+            sidebarSellButtons: getSidebarOptionButtons('sell').map(getDebugButtonInfo),
+            sidebarBuySubmit: getDebugButtonInfo(findSidebarSubmitButton('buy'), -1),
+            sidebarSellSubmit: getDebugButtonInfo(findSidebarSubmitButton('sell'), -1),
             isAutoTrading,
             forceSellBeforeStop,
             autoTradeRecoveryReloads,
