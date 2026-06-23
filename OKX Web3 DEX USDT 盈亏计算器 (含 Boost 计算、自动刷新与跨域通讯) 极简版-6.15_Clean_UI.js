@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OKX Web3 DEX USDT 盈亏计算器 (含 Boost 计算、自动刷新与自动交易) 极简版
 // @namespace    http://tampermonkey.net/
-// @version      6.64_SidebarSwapSubmit
+// @version      6.65_TradeStatsPause
 // @description  使用订单接口统计 USDT 净差，并使用官方 Boost records 实时同步 Boost 交易量进度
 // @author       Dilemmmmmmma
 // @match        *://web3.okx.com/*
@@ -56,6 +56,7 @@
     let autoTradeRecoveryReloads = 0;
     let isAutoTradeReloading = false;
     let activeTradeExecutorMode = 'instant';
+    let isTradeStatsPaused = false;
 
     const LS_KEY_BOOST_DAILY = 'okx_usdt_boost_daily';
     const LS_KEY_BOOST_MULTI = 'okx_usdt_boost_multi';
@@ -64,6 +65,7 @@
     const LS_KEY_BOOST_ACCOUNT_ID = 'okx_usdt_boost_account_id';
     const LS_KEY_BOOST_RECORDS = 'okx_usdt_boost_records';
     const LS_KEY_AUTO_TRADE_RESUME = 'okx_usdt_auto_trade_resume';
+    const LS_KEY_TRADE_STATS_PAUSED = 'okx_usdt_trade_stats_paused';
     const BOOST_RECORDS_REFRESH_INTERVAL_MS = 300000;
     const BOOST_RECORDS_PATH = '/priapi/v1/dapp/boost/records';
     const ORDER_HISTORY_PATH = '/priapi/v1/dx/trade/multi/v2/orderHistory';
@@ -157,6 +159,13 @@
         return {
             ...createEmptyStats(Number(stats && stats.count) || 0),
             ...(stats || {})
+        };
+    }
+
+    function createPausedTradeStats() {
+        return {
+            ...createEmptyStats(0),
+            tradeStatsPaused: true
         };
     }
 
@@ -864,6 +873,13 @@
                         <span id="alarm-toggle-text">开启达量警报</span>
                     </label>
                 </div>
+                <div class="okx-calc-row">
+                    <span class="okx-calc-muted">停止交易统计</span>
+                    <label id="trade-stats-toggle-label" class="okx-calc-alarm" title="开启后不拉取订单历史、不计算USDT交易统计，自动交易持续买卖">
+                        <input type="checkbox" id="pause-trade-stats">
+                        <span id="trade-stats-toggle-text">交易统计运行中</span>
+                    </label>
+                </div>
             </div>
         `;
 
@@ -874,6 +890,9 @@
             isAlarmEnabled = e.target.checked;
             updateAlarmToggleState();
             if (isAlarmEnabled) playAlertSound();
+        });
+        document.getElementById('pause-trade-stats').addEventListener('change', (e) => {
+            setTradeStatsPaused(e.target.checked);
         });
 
         document.getElementById('btn-auto-trade').addEventListener('click', toggleAutoTrade);
@@ -890,6 +909,7 @@
 
         loadBoostSettings();
         loadRebateSettings();
+        loadTradeStatsPausedSetting();
         loadBoostRecordsCache();
         renderBoostRecords();
         refreshBoostRecordsFromCache();
@@ -935,6 +955,38 @@
         const rebateInput = document.getElementById('rebate-percent');
         if (!rebateInput) return;
         window.localStorage.setItem(LS_KEY_REBATE_PERCENT, String(rebateInput.value));
+    }
+
+    function loadTradeStatsPausedSetting() {
+        isTradeStatsPaused = window.localStorage.getItem(LS_KEY_TRADE_STATS_PAUSED) === '1';
+
+        const checkbox = document.getElementById('pause-trade-stats');
+        if (checkbox) checkbox.checked = isTradeStatsPaused;
+        updateTradeStatsPausedToggleState();
+    }
+
+    function updateTradeStatsPausedToggleState() {
+        const label = document.getElementById('trade-stats-toggle-label');
+        const text = document.getElementById('trade-stats-toggle-text');
+
+        if (label) label.classList.toggle('is-enabled', isTradeStatsPaused);
+        if (text) text.textContent = isTradeStatsPaused ? '交易统计已停止' : '交易统计运行中';
+    }
+
+    function setTradeStatsPaused(paused) {
+        isTradeStatsPaused = Boolean(paused);
+        window.localStorage.setItem(LS_KEY_TRADE_STATS_PAUSED, isTradeStatsPaused ? '1' : '0');
+        updateTradeStatsPausedToggleState();
+
+        if (isTradeStatsPaused) {
+            clearSellOrderSyncBackgroundTimer();
+            pendingSellOrderSync = null;
+            updateAutoTradeStatus('交易统计已停止，跳过账单同步', '#ff9800');
+        } else {
+            updateAutoTradeStatus('交易统计已恢复', '#4caf50');
+        }
+
+        calculateStats();
     }
 
     function updateBoostAutomationStatus(message, color = '#909090') {
@@ -1192,6 +1244,25 @@
 
     async function syncDataOnAutoTradeStop(reason = '') {
         if (stopSyncPromise) return stopSyncPromise;
+
+        if (isTradeStatsPaused) {
+            updateAutoTradeStatus(`${reason || '已停止'}，交易统计已停止`, '#ff9800');
+            stopSyncPromise = (async () => {
+                try {
+                    await Promise.race([
+                        refreshBoostRecordsFromCache(),
+                        sleep(4500)
+                    ]);
+                    renderBoostRecords();
+                } catch (err) {
+                    console.error('[USDT计算器] 停止自动交易后同步 Boost records 失败', err);
+                } finally {
+                    stopSyncPromise = null;
+                }
+            })();
+
+            return stopSyncPromise;
+        }
 
         updateAutoTradeStatus(`${reason || '已停止'}，同步数据中`, '#2196f3');
         stopSyncPromise = (async () => {
@@ -1666,6 +1737,8 @@
     }
 
     function readOrderVolumeStats() {
+        if (isTradeStatsPaused) return createPausedTradeStats();
+
         const windowInfo = getDailyStatsWindow();
         syncDailyOrderRecords(windowInfo);
 
@@ -1720,7 +1793,59 @@
         const rebateAdjustedWearElement = document.getElementById('usdt-rebate-adjusted-wear');
         const weightedProgressElement = document.getElementById('boost-weighted-progress');
         const sourceElement = document.getElementById('summary-source-status');
+        const progressElement = document.getElementById('boost-target-progress');
         const feeBreakdown = displayStats.feeBreakdown || null;
+
+        if (isTradeStatsPaused) {
+            if (volumeElement) {
+                volumeElement.textContent = '--';
+                volumeElement.title = '交易统计已停止';
+            }
+
+            if (netElement) {
+                netElement.textContent = '--';
+                netElement.style.color = '#909090';
+                netElement.title = '交易统计已停止';
+            }
+
+            if (estimatedRebateElement) {
+                estimatedRebateElement.textContent = '--';
+                estimatedRebateElement.style.color = '#909090';
+                estimatedRebateElement.title = '交易统计已停止';
+            }
+
+            if (estimatedWearElement) {
+                estimatedWearElement.textContent = '--';
+                estimatedWearElement.style.color = '#909090';
+                estimatedWearElement.title = '交易统计已停止';
+            }
+
+            if (rebateAdjustedWearElement) {
+                rebateAdjustedWearElement.textContent = '--';
+                rebateAdjustedWearElement.style.color = '#909090';
+                rebateAdjustedWearElement.title = '交易统计已停止';
+            }
+
+            if (weightedProgressElement) {
+                weightedProgressElement.textContent = '已停止';
+                weightedProgressElement.style.color = '#909090';
+                weightedProgressElement.title = '交易统计已停止，自动交易将持续买卖';
+            }
+
+            if (sourceElement) {
+                sourceElement.textContent = '统计停止';
+                sourceElement.title = '已停止账单同步与交易统计';
+                sourceElement.style.color = '#ff9800';
+            }
+
+            if (progressElement) {
+                progressElement.textContent = '已停止';
+                progressElement.title = '交易统计已停止，不用达量进度停止自动交易';
+                progressElement.style.color = '#909090';
+            }
+
+            return rawStats;
+        }
 
         if (volumeElement) {
             volumeElement.textContent = displayStats.total.toFixed(4);
@@ -1810,7 +1935,6 @@
         }
 
         const weightedTargetStats = getWeightedBoostProgressStats(displayStats);
-        const progressElement = document.getElementById('boost-target-progress');
         if (progressElement) {
             const cappedPercentage = Math.min(weightedTargetStats.percentage, 100);
             progressElement.textContent = cappedPercentage > 0 && cappedPercentage < 0.1
@@ -1872,6 +1996,7 @@
     }
 
     async function fetchOrderHistoryByApi() {
+        if (isTradeStatsPaused) return null;
         if (orderHistoryFetchPromise) return orderHistoryFetchPromise;
 
         const accountId = getReusableAccountId();
@@ -1918,6 +2043,8 @@
     }
 
     function beginPendingSellOrderSync(baselineStats) {
+        if (isTradeStatsPaused) return;
+
         clearSellOrderSyncBackgroundTimer();
         pendingSellOrderSync = {
             baselineStats: cloneStats(baselineStats || readOrderVolumeStats()),
@@ -1936,6 +2063,8 @@
     }
 
     async function fetchOrderHistoryAndReadStats() {
+        if (isTradeStatsPaused) return createPausedTradeStats();
+
         await fetchOrderHistoryByApi();
         const latestStats = readOrderVolumeStats();
         calculateStats();
@@ -1943,6 +2072,8 @@
     }
 
     function startBackgroundSellOrderSync() {
+        if (isTradeStatsPaused) return;
+
         clearSellOrderSyncBackgroundTimer();
         if (!pendingSellOrderSync) return;
 
@@ -1976,6 +2107,13 @@
     }
 
     async function refreshOrderHistoryAfterConfirmedSell(beforeOrderStats, options = {}) {
+        if (isTradeStatsPaused) {
+            clearSellOrderSyncBackgroundTimer();
+            pendingSellOrderSync = null;
+            updateAutoTradeStatus('交易统计已停止，跳过卖出账单同步', '#ff9800');
+            return true;
+        }
+
         const requireSellIncrease = options.requireSellIncrease !== false;
         updateAutoTradeStatus('卖出已确认，同步订单历史', '#2196f3');
 
@@ -2930,6 +3068,8 @@
     }
 
     async function waitForSummaryValueChange(key, previousValues, timeoutMs) {
+        if (isTradeStatsPaused) return false;
+
         const deadline = Date.now() + timeoutMs;
         let lastOfficialBoostRefreshAt = 0;
         const rawPreviousOfficialBoostTotal = previousValues && previousValues.order && previousValues.order.officialBoostTotal;
@@ -2965,7 +3105,7 @@
             order: calculateStats(),
             dex: readDexVolumeStats()
         };
-        const requireSummaryChange = side === 'sell' || Boolean(options.requireSummaryChange);
+        const requireSummaryChange = !isTradeStatsPaused && (side === 'sell' || Boolean(options.requireSummaryChange));
 
         updateAutoTradeStatus(`${label}准备中`, '#2196f3');
         const tradeMode = await ensureTradeExecutorMode();
@@ -3017,7 +3157,7 @@
                 return false;
             }
 
-            const changedAfterFailure = await waitForSummaryValueChange(key, beforeStats, 8000);
+            const changedAfterFailure = !isTradeStatsPaused && (await waitForSummaryValueChange(key, beforeStats, 8000));
             if (changedAfterFailure) {
                 if (side === 'sell') {
                     const synced = await refreshOrderHistoryAfterConfirmedSell(beforeStats.order);
@@ -3058,7 +3198,7 @@
         if (!isAutoTrading) return;
 
         const targetVolumeStats = calculateStats();
-        const targetReached = getWeightedBoostProgressStats(targetVolumeStats).reached;
+        const targetReached = !isTradeStatsPaused && getWeightedBoostProgressStats(targetVolumeStats).reached;
 
         // 达量后无论下一步原本是什么，都强制最终执行 100% 卖出，避免停在买入仓位。
         const sideToRun = (targetReached || forceSellBeforeStop) ? 'sell' : autoTradeSide;
@@ -3075,7 +3215,7 @@
 
         const latestTargetVolumeStats = calculateStats();
 
-        if (sideToRun === 'sell' && success && getWeightedBoostProgressStats(latestTargetVolumeStats).reached) {
+        if (!isTradeStatsPaused && sideToRun === 'sell' && success && getWeightedBoostProgressStats(latestTargetVolumeStats).reached) {
             stopAutoTrade('已达实际需刷量，并检测到卖出变化');
             return;
         }
@@ -3083,7 +3223,7 @@
         if (sideToRun === 'sell' && success && forceSellBeforeStop) {
             forceSellBeforeStop = false;
             consecutiveTradeFailures = 0;
-            autoTradeSide = getWeightedBoostProgressStats(latestTargetVolumeStats).reached ? 'sell' : 'buy';
+            autoTradeSide = !isTradeStatsPaused && getWeightedBoostProgressStats(latestTargetVolumeStats).reached ? 'sell' : 'buy';
             updateAutoTradeStatus(
                 autoTradeSide === 'buy' ? '卖出已确认，恢复买入' : '卖出已确认，等待停止',
                 '#4caf50'
@@ -3146,6 +3286,8 @@
     }
 
     function handleOrderHistoryResponse(data) {
+        if (isTradeStatsPaused) return;
+
         extractOrders(data);
         calculateStats();
     }
@@ -3252,6 +3394,7 @@
             isAutoTradeReloading,
             oneClickTradeOpenAttempted,
             consecutiveTradeFailures,
+            tradeStatsPaused: isTradeStatsPaused,
             orderHistoryAccountId: getReusableAccountId(),
             orderHistoryFetchInFlight: Boolean(orderHistoryFetchPromise),
             pendingSellOrderSync,
