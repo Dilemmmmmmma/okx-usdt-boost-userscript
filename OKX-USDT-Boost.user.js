@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OKX Web3 DEX USDT 盈亏计算器 (含 Boost 计算、自动刷新与自动交易) 极简版
 // @namespace    http://tampermonkey.net/
-// @version      6.61_SidebarFallback
+// @version      6.62_SidebarSubmitWait
 // @description  使用订单接口统计 USDT 净差，并使用官方 Boost records 实时同步 Boost 交易量进度
 // @author       Dilemmmmmmma
 // @match        *://web3.okx.com/*
@@ -2302,6 +2302,14 @@
             /\bdisabled\b/i.test(button.className || '');
     }
 
+    function isDomDisabledButton(el) {
+        if (!el) return true;
+        const button = el.closest('button') || el;
+        return Boolean(button.disabled) ||
+            button.hasAttribute('disabled') ||
+            button.getAttribute('aria-disabled') === 'true';
+    }
+
     async function selectTradeTab(side) {
         if (activeTradeExecutorMode === 'sidebar') {
             return selectSidebarTradeTab(side);
@@ -2706,37 +2714,45 @@
         return Boolean(findSidebarSubmitButton('sell'));
     }
 
-    function findSidebarSubmitButton(side) {
+    function findSidebarSubmitButton(side, options = {}) {
         const panel = getSidebarTradePanel();
         if (!panel) return null;
 
+        const includeDisabled = Boolean(options.includeDisabled);
         const sideText = side === 'buy' ? '买入' : '卖出';
         const panelRect = panel.getBoundingClientRect();
         return Array.from(panel.querySelectorAll('button, [role="button"]'))
             .filter(isVisible)
-            .filter((button) => !isDisabledButton(button))
             .map((button) => ({
                 button,
                 text: getButtonText(button),
-                rect: button.getBoundingClientRect()
+                rect: button.getBoundingClientRect(),
+                disabled: isDomDisabledButton(button)
             }))
             .filter((item) => {
                 if (!item.text.startsWith(sideText)) return false;
                 if (item.text === sideText && item.rect.top <= panelRect.top + 120) return false;
                 return item.rect.width >= 120 && item.rect.height >= 28;
             })
+            .filter((item) => includeDisabled || !item.disabled)
             .sort((a, b) => b.rect.width * b.rect.height - a.rect.width * a.rect.height || b.rect.top - a.rect.top)[0]?.button || null;
     }
 
     async function clickSidebarSubmitButton(side, timeoutMs) {
         const deadline = Date.now() + timeoutMs;
         const sideText = side === 'buy' ? '买入' : '卖出';
+        let lastWaitingStatusAt = 0;
 
         while (isAutoTrading && Date.now() < deadline) {
-            const submitButton = findSidebarSubmitButton(side);
-            if (submitButton) {
+            const submitButton = findSidebarSubmitButton(side, { includeDisabled: true });
+            if (submitButton && !isDomDisabledButton(submitButton)) {
                 updateAutoTradeStatus(`右侧栏点击${sideText}按钮`, '#2196f3');
                 return triggerRealClick(submitButton);
+            }
+
+            if (submitButton && Date.now() - lastWaitingStatusAt > 1000) {
+                updateAutoTradeStatus(`等待右侧栏${sideText}按钮可用`, '#2196f3');
+                lastWaitingStatusAt = Date.now();
             }
             await sleep(300);
         }
@@ -3193,6 +3209,7 @@
             text: getButtonText(button),
             className: String(button.className || ''),
             disabled: isDisabledButton(button),
+            domDisabled: isDomDisabledButton(button),
             rect: {
                 left: Math.round(rect.left),
                 top: Math.round(rect.top),
@@ -3219,6 +3236,8 @@
             sidebarSellButtons: getSidebarOptionButtons('sell').map(getDebugButtonInfo),
             sidebarBuySubmit: getDebugButtonInfo(findSidebarSubmitButton('buy'), -1),
             sidebarSellSubmit: getDebugButtonInfo(findSidebarSubmitButton('sell'), -1),
+            sidebarBuySubmitCandidate: getDebugButtonInfo(findSidebarSubmitButton('buy', { includeDisabled: true }), -1),
+            sidebarSellSubmitCandidate: getDebugButtonInfo(findSidebarSubmitButton('sell', { includeDisabled: true }), -1),
             isAutoTrading,
             forceSellBeforeStop,
             autoTradeRecoveryReloads,
