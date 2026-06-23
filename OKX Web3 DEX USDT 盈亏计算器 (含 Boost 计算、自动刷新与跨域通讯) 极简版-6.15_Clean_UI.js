@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OKX Web3 DEX USDT 盈亏计算器 (含 Boost 计算、自动刷新与自动交易) 极简版
 // @namespace    http://tampermonkey.net/
-// @version      6.63_SidebarGlobalSubmit
+// @version      6.64_SidebarSwapSubmit
 // @description  使用订单接口统计 USDT 净差，并使用官方 Boost records 实时同步 Boost 交易量进度
 // @author       Dilemmmmmmma
 // @match        *://web3.okx.com/*
@@ -2718,6 +2718,9 @@
         const panel = getSidebarTradePanel();
         const includeDisabled = Boolean(options.includeDisabled);
         const sideText = side === 'buy' ? '买入' : '卖出';
+        const isSubmitText = (text) => side === 'buy'
+            ? text.startsWith('买入')
+            : text.startsWith('卖出') || text.startsWith('兑换为');
         const panelRect = panel ? panel.getBoundingClientRect() : null;
         const rightAreaLeft = panelRect
             ? Math.max(280, Math.min(window.innerWidth * 0.42, panelRect.left - 180))
@@ -2734,7 +2737,7 @@
                 disabled: isDomDisabledButton(button)
             }))
             .filter((item) => {
-                if (!item.text.startsWith(sideText)) return false;
+                if (!isSubmitText(item.text)) return false;
                 if (item.rect.left < rightAreaLeft) return false;
                 if (panelRect && item.text === sideText && item.rect.top <= panelRect.top + 120) return false;
                 return item.rect.width >= 120 && item.rect.height >= 28;
