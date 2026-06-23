@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         OKX Web3 DEX USDT 盈亏计算器 (含 Boost 计算、自动刷新与自动交易) 极简版
 // @namespace    http://tampermonkey.net/
-// @version      6.62_SidebarSubmitWait
+// @version      6.63_SidebarGlobalSubmit
 // @description  使用订单接口统计 USDT 净差，并使用官方 Boost records 实时同步 Boost 交易量进度
 // @author       Dilemmmmmmma
 // @match        *://web3.okx.com/*
@@ -2716,13 +2716,17 @@
 
     function findSidebarSubmitButton(side, options = {}) {
         const panel = getSidebarTradePanel();
-        if (!panel) return null;
-
         const includeDisabled = Boolean(options.includeDisabled);
         const sideText = side === 'buy' ? '买入' : '卖出';
-        const panelRect = panel.getBoundingClientRect();
-        return Array.from(panel.querySelectorAll('button, [role="button"]'))
+        const panelRect = panel ? panel.getBoundingClientRect() : null;
+        const rightAreaLeft = panelRect
+            ? Math.max(280, Math.min(window.innerWidth * 0.42, panelRect.left - 180))
+            : Math.max(280, window.innerWidth * 0.42);
+        const ownPanel = document.getElementById('okx-usdt-calculator');
+
+        return Array.from(document.querySelectorAll('button, [role="button"]'))
             .filter(isVisible)
+            .filter((button) => !ownPanel || !ownPanel.contains(button))
             .map((button) => ({
                 button,
                 text: getButtonText(button),
@@ -2731,7 +2735,8 @@
             }))
             .filter((item) => {
                 if (!item.text.startsWith(sideText)) return false;
-                if (item.text === sideText && item.rect.top <= panelRect.top + 120) return false;
+                if (item.rect.left < rightAreaLeft) return false;
+                if (panelRect && item.text === sideText && item.rect.top <= panelRect.top + 120) return false;
                 return item.rect.width >= 120 && item.rect.height >= 28;
             })
             .filter((item) => includeDisabled || !item.disabled)
