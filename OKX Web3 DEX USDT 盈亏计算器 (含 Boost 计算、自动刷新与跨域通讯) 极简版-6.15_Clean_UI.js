@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         OKX Web3 DEX USDT 盈亏计算器 (含 Boost 计算、自动刷新与自动交易) 极简版
 // @namespace    http://tampermonkey.net/
-// @version      6.66_OrderHistoryTotal
-// @description  使用订单接口统计 USDT 总交易额与净差，并使用官方 Boost records 实时同步总 Boost 交易额与进度
+// @version      6.67_ScheduledAutoTrade
+// @description  使用订单接口统计 USDT 总交易额与净差，支持定时启动自动交易，并使用官方 Boost records 实时同步总 Boost 交易额与进度
 // @author       Dilemmmmmmma
 // @match        *://web3.okx.com/*
 // @match        *://web3.cnouxyex.co/*
@@ -57,6 +57,8 @@
     let isAutoTradeReloading = false;
     let activeTradeExecutorMode = 'instant';
     let isTradeStatsPaused = false;
+    let scheduledAutoTradeEndAt = 0;
+    let scheduledAutoTradeTimerId = null;
 
     const LS_KEY_BOOST_DAILY = 'okx_usdt_boost_daily';
     const LS_KEY_BOOST_MULTI = 'okx_usdt_boost_multi';
@@ -66,6 +68,7 @@
     const LS_KEY_BOOST_RECORDS = 'okx_usdt_boost_records';
     const LS_KEY_AUTO_TRADE_RESUME = 'okx_usdt_auto_trade_resume';
     const LS_KEY_TRADE_STATS_PAUSED = 'okx_usdt_trade_stats_paused';
+    const LS_KEY_AUTO_TRADE_SCHEDULE_END_AT = 'okx_usdt_auto_trade_schedule_end_at';
     const BOOST_RECORDS_REFRESH_INTERVAL_MS = 300000;
     const BOOST_RECORDS_PATH = '/priapi/v1/dapp/boost/records';
     const ORDER_HISTORY_PATH = '/priapi/v1/dx/trade/multi/v2/orderHistory';
@@ -866,8 +869,16 @@
                         买入序号
                         <input type="number" min="1" step="1" id="buy-option-index" value="3">
                     </label>
+                    <label title="倒计时结束后自动开启自动交易">
+                        定时启动(分钟)
+                        <input type="number" min="1" step="1" id="auto-trade-delay-minutes" value="10">
+                    </label>
                 </div>
                 <div id="boost-auto-status" class="okx-calc-muted" style="margin-bottom: 6px;">自动识别中</div>
+                <div class="okx-calc-row">
+                    <span id="auto-trade-schedule-status" class="okx-calc-muted">定时启动未设置</span>
+                    <button id="btn-schedule-auto-trade" type="button" class="okx-calc-action">开始倒计时</button>
+                </div>
                 <div class="okx-calc-row">
                     <span class="okx-calc-muted">达到目标后提示并停止</span>
                     <label id="alarm-toggle-label" class="okx-calc-alarm" title="当官方 Boost records 今日 tradingVolume / 10 达到日均目标时发出提示音">
@@ -898,6 +909,7 @@
         });
 
         document.getElementById('btn-auto-trade').addEventListener('click', toggleAutoTrade);
+        document.getElementById('btn-schedule-auto-trade').addEventListener('click', toggleScheduledAutoTrade);
         document.getElementById('boost-daily').addEventListener('input', calculateBoost);
         document.getElementById('boost-multi').addEventListener('input', () => {
             boostMultiplierManuallyEdited = true;
@@ -923,7 +935,9 @@
         if (!boostRecordsRefreshIntervalId) {
             boostRecordsRefreshIntervalId = setInterval(refreshBoostRecordsFromCache, BOOST_RECORDS_REFRESH_INTERVAL_MS);
         }
-        resumeAutoTradeAfterReload();
+        const resumedAfterReload = resumeAutoTradeAfterReload();
+        loadScheduledAutoTrade();
+        if (resumedAfterReload && scheduledAutoTradeEndAt) clearScheduledAutoTrade('网页恢复自动交易，已取消定时启动');
     }
 
     function loadBoostSettings() {
@@ -996,6 +1010,112 @@
         if (!status) return;
         status.textContent = message;
         status.style.color = color;
+    }
+
+    function updateScheduledAutoTradeStatus(message, color = '#909090') {
+        const status = document.getElementById('auto-trade-schedule-status');
+        if (!status) return;
+        status.textContent = message;
+        status.style.color = color;
+    }
+
+    function setScheduledAutoTradeButton(active) {
+        const btn = document.getElementById('btn-schedule-auto-trade');
+        if (!btn) return;
+
+        btn.textContent = active ? '取消定时' : '开始倒计时';
+        btn.style.color = active ? '#fc46ab' : '#e6e6e6';
+        btn.style.background = active ? '#351520' : '#202020';
+    }
+
+    function clearScheduledAutoTrade(message = '定时启动未设置') {
+        if (scheduledAutoTradeTimerId) {
+            clearTimeout(scheduledAutoTradeTimerId);
+            scheduledAutoTradeTimerId = null;
+        }
+
+        scheduledAutoTradeEndAt = 0;
+        window.localStorage.removeItem(LS_KEY_AUTO_TRADE_SCHEDULE_END_AT);
+        setScheduledAutoTradeButton(false);
+        if (message !== null) updateScheduledAutoTradeStatus(message);
+    }
+
+    function formatScheduledCountdown(ms) {
+        const totalSeconds = Math.max(0, Math.ceil(ms / 1000));
+        const hours = Math.floor(totalSeconds / 3600);
+        const minutes = Math.floor((totalSeconds % 3600) / 60);
+        const seconds = totalSeconds % 60;
+        if (hours > 0) return `${hours}:${pad2(minutes)}:${pad2(seconds)}`;
+        return `${minutes}:${pad2(seconds)}`;
+    }
+
+    function refreshScheduledAutoTradeCountdown() {
+        if (scheduledAutoTradeTimerId) {
+            clearTimeout(scheduledAutoTradeTimerId);
+            scheduledAutoTradeTimerId = null;
+        }
+
+        if (!scheduledAutoTradeEndAt) {
+            clearScheduledAutoTrade();
+            return;
+        }
+
+        if (isAutoTrading) {
+            clearScheduledAutoTrade('自动交易已运行，定时已取消');
+            return;
+        }
+
+        const remainingMs = scheduledAutoTradeEndAt - Date.now();
+        if (remainingMs <= 0) {
+            scheduledAutoTradeEndAt = 0;
+            window.localStorage.removeItem(LS_KEY_AUTO_TRADE_SCHEDULE_END_AT);
+            setScheduledAutoTradeButton(false);
+            updateScheduledAutoTradeStatus('倒计时结束，正在启动自动交易', '#a5ff00');
+            startAutoTrade('定时启动到点，准备买入', { fromSchedule: true });
+            return;
+        }
+
+        setScheduledAutoTradeButton(true);
+        updateScheduledAutoTradeStatus(`剩余 ${formatScheduledCountdown(remainingMs)}`, '#a5ff00');
+        scheduledAutoTradeTimerId = setTimeout(refreshScheduledAutoTradeCountdown, 1000);
+    }
+
+    function startScheduledAutoTradeCountdown() {
+        if (isAutoTrading) {
+            clearScheduledAutoTrade('自动交易已运行，无需定时启动');
+            return;
+        }
+
+        const input = document.getElementById('auto-trade-delay-minutes');
+        const minutes = parseFloat(input && input.value);
+        if (!Number.isFinite(minutes) || minutes <= 0) {
+            updateScheduledAutoTradeStatus('请输入大于 0 的分钟数', '#fc46ab');
+            return;
+        }
+
+        scheduledAutoTradeEndAt = Date.now() + minutes * 60 * 1000;
+        window.localStorage.setItem(LS_KEY_AUTO_TRADE_SCHEDULE_END_AT, String(scheduledAutoTradeEndAt));
+        refreshScheduledAutoTradeCountdown();
+    }
+
+    function toggleScheduledAutoTrade() {
+        if (scheduledAutoTradeEndAt) {
+            clearScheduledAutoTrade('定时启动已取消');
+            return;
+        }
+
+        startScheduledAutoTradeCountdown();
+    }
+
+    function loadScheduledAutoTrade() {
+        const savedEndAt = Number(window.localStorage.getItem(LS_KEY_AUTO_TRADE_SCHEDULE_END_AT));
+        if (!Number.isFinite(savedEndAt) || savedEndAt <= 0) {
+            clearScheduledAutoTrade();
+            return;
+        }
+
+        scheduledAutoTradeEndAt = savedEndAt;
+        refreshScheduledAutoTradeCountdown();
     }
 
     function parseBoostRecordsAccountId(url) {
@@ -2321,11 +2441,24 @@
             return;
         }
 
+        startAutoTrade('已启动，准备买入');
+    }
+
+    function startAutoTrade(startMessage = '已启动，准备买入', options = {}) {
+        if (isAutoTrading) {
+            updateAutoTradeStatus('自动交易已在运行', '#ff9800');
+            return false;
+        }
+
         const target = getBoostTarget();
         if (!Number.isFinite(target)) {
             updateAutoTradeStatus('实际需刷量无效，无法启动', '#ff5252');
-            return;
+            if (options.fromSchedule) updateScheduledAutoTradeStatus('定时启动失败：实际需刷量无效', '#fc46ab');
+            clearScheduledAutoTrade(null);
+            return false;
         }
+
+        if (!options.fromSchedule && scheduledAutoTradeEndAt) clearScheduledAutoTrade('自动交易已启动，定时已取消');
 
         getAutoTradeConfig();
         clearAutoTradeResumeState();
@@ -2339,8 +2472,10 @@
         activeTradeExecutorMode = 'instant';
         setAutoTradeButtonRunning();
 
-        updateAutoTradeStatus('已启动，准备买入', '#4caf50');
+        updateAutoTradeStatus(startMessage, '#4caf50');
+        if (options.fromSchedule) updateScheduledAutoTradeStatus('已定时启动自动交易', '#a5ff00');
         runAutoTradeLoop();
+        return true;
     }
 
     function stopAutoTrade(reason) {
@@ -3411,6 +3546,8 @@
             oneClickTradeOpenAttempted,
             consecutiveTradeFailures,
             tradeStatsPaused: isTradeStatsPaused,
+            scheduledAutoTradeEndAt,
+            scheduledAutoTradeRemainingMs: scheduledAutoTradeEndAt ? Math.max(0, scheduledAutoTradeEndAt - Date.now()) : 0,
             orderHistoryAccountId: getReusableAccountId(),
             orderHistoryFetchInFlight: Boolean(orderHistoryFetchPromise),
             pendingSellOrderSync,
