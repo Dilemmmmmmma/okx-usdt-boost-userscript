@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         OKX Web3 DEX USDT 盈亏计算器 (含 Boost 计算、自动刷新与自动交易) 极简版
 // @namespace    http://tampermonkey.net/
-// @version      6.65_TradeStatsPause
-// @description  使用订单接口统计 USDT 净差，并使用官方 Boost records 实时同步 Boost 交易量进度
+// @version      6.66_OrderHistoryTotal
+// @description  使用订单接口统计 USDT 总交易额与净差，并使用官方 Boost records 实时同步总 Boost 交易额与进度
 // @author       Dilemmmmmmma
 // @match        *://web3.okx.com/*
 // @match        *://web3.cnouxyex.co/*
@@ -141,6 +141,7 @@
             buy: 0,
             sell: 0,
             total: 0,
+            orderHistoryTotal: 0,
             net: 0,
             boostProgress: 0,
             boostSnapshotCount: 0,
@@ -821,9 +822,10 @@
                     <span>USDT 交易统计(Boost榜无返佣)</span>
                     <span id="summary-source-status" class="okx-calc-muted">读取中</span>
                 </div>
-                <div class="okx-calc-row"><span>总交易额</span><span id="usdt-volume" class="okx-calc-value">0.0000</span></div>
+                <div class="okx-calc-row"><span title="订单历史当前 08:00 周期内 USDT 买入+卖出累计">总交易额</span><span id="order-history-volume" class="okx-calc-value">0.0000</span></div>
+                <div class="okx-calc-row"><span title="官方 Boost records 今日 tradingVolume">总Boost交易额</span><span id="usdt-volume" class="okx-calc-value">0.0000</span></div>
                 <div class="okx-calc-row"><span title="-(实际需刷量 × 未加成基础倍数% × (1 - 固定返利20%))">预估手续费</span><span id="usdt-estimated-wear" class="okx-calc-value">--</span></div>
-                <div class="okx-calc-row"><span title="总交易额 / Boost倍数 × (返佣比例 - 固定返利20%) × 未加成基础倍数%">实际返佣</span><span id="usdt-estimated-rebate" class="okx-calc-value">--</span></div>
+                <div class="okx-calc-row"><span title="总Boost交易额 / Boost倍数 × (返佣比例 - 固定返利20%) × 未加成基础倍数%">实际返佣</span><span id="usdt-estimated-rebate" class="okx-calc-value">--</span></div>
                 <div class="okx-calc-row"><span>USDT 净差</span><span id="usdt-net" class="okx-calc-value">0.0000</span></div>
                 <div class="okx-calc-row"><span title="USDT净差 + 当前交易量对应的实际返佣">返佣后磨损</span><span id="usdt-rebate-adjusted-wear" class="okx-calc-value">--</span></div>
                 <div class="okx-calc-row"><span title="官方 Boost records 今日 tradingVolume / 10；接口异常时回退到本地订单估算">Boost交易量进度</span><span id="boost-weighted-progress" class="okx-calc-value">0.00</span></div>
@@ -1754,7 +1756,8 @@
             }
         });
 
-        stats.total = stats.buy + stats.sell;
+        stats.orderHistoryTotal = stats.buy + stats.sell;
+        stats.total = stats.orderHistoryTotal;
         stats.net = stats.sell - stats.buy;
         if (stats.boostProgress <= 0 && stats.total > 0 && stats.boostSnapshotCount === 0) {
             const currentBoostSnapshot = getCurrentBoostSnapshot();
@@ -1786,6 +1789,7 @@
         lastStats = rawStats;
         const displayStats = getStatsForDisplay(rawStats);
 
+        const orderHistoryVolumeElement = document.getElementById('order-history-volume');
         const volumeElement = document.getElementById('usdt-volume');
         const netElement = document.getElementById('usdt-net');
         const estimatedRebateElement = document.getElementById('usdt-estimated-rebate');
@@ -1797,6 +1801,11 @@
         const feeBreakdown = displayStats.feeBreakdown || null;
 
         if (isTradeStatsPaused) {
+            if (orderHistoryVolumeElement) {
+                orderHistoryVolumeElement.textContent = '--';
+                orderHistoryVolumeElement.title = '交易统计已停止';
+            }
+
             if (volumeElement) {
                 volumeElement.textContent = '--';
                 volumeElement.title = '交易统计已停止';
@@ -1847,13 +1856,20 @@
             return rawStats;
         }
 
+        if (orderHistoryVolumeElement) {
+            orderHistoryVolumeElement.textContent = formatUnsignedAmount(displayStats.orderHistoryTotal, 4);
+            orderHistoryVolumeElement.title = displayStats.sellSyncPending
+                ? '卖出订单同步中，暂用卖出前的订单历史总交易额'
+                : '订单历史当前 08:00 周期 USDT 买入+卖出累计';
+        }
+
         if (volumeElement) {
-            volumeElement.textContent = displayStats.total.toFixed(4);
+            volumeElement.textContent = formatUnsignedAmount(displayStats.total, 4);
             volumeElement.title = displayStats.sellSyncPending
-                ? '卖出已确认，正在等待订单历史出现卖出记录'
+                ? '卖出已确认，正在等待订单历史出现卖出记录；总Boost交易额暂用当前值'
                 : displayStats.boostProgressOfficial
-                ? '官方 Boost records 今日 tradingVolume，未使用 orderHistory 总值'
-                : '订单历史当前 08:00 周期总交易额';
+                ? '官方 Boost records 今日 tradingVolume'
+                : '官方 Boost records 暂不可用，回退显示订单历史总交易额';
         }
 
         if (netElement) {
@@ -1874,7 +1890,7 @@
                 : '--';
             estimatedRebateElement.style.color = feeBreakdown && feeBreakdown.actualRebate > 0 ? '#a5ff00' : '#e6e6e6';
             estimatedRebateElement.title = feeBreakdown
-                ? `总交易额 ${formatUnsignedAmount(displayStats.total, 4)} / Boost倍数 ${feeBreakdown.boostMultiplier} × (${feeBreakdown.rebatePercent}% - ${FIXED_INVITE_REBATE_PERCENT}%) × 基础 ${feeBreakdown.baseBoostPercent}%`
+                ? `总Boost交易额 ${formatUnsignedAmount(displayStats.total, 4)} / Boost倍数 ${feeBreakdown.boostMultiplier} × (${feeBreakdown.rebatePercent}% - ${FIXED_INVITE_REBATE_PERCENT}%) × 基础 ${feeBreakdown.baseBoostPercent}%`
                 : '等待返佣比例、Boost倍数和基础倍数';
         }
 
@@ -1926,7 +1942,7 @@
             sourceElement.title = displayStats.sellSyncPending
                 ? '卖出已确认，等待订单历史接口返回卖出订单'
                 : displayStats.boostProgressOfficial
-                ? `官方 records 更新时间：${displayStats.officialBoostUpdatedAt ? new Date(displayStats.officialBoostUpdatedAt).toLocaleString() : '未知'}；净差仍来自订单历史`
+                ? `官方 records 更新时间：${displayStats.officialBoostUpdatedAt ? new Date(displayStats.officialBoostUpdatedAt).toLocaleString() : '未知'}；总交易额和净差来自订单历史`
                 : `统计周期：${new Date(windowInfo.startMs).toLocaleString()} - ${new Date(windowInfo.endMs).toLocaleString()}`;
             sourceElement.style.color = displayStats.sellSyncPending
                 ? '#2196f3'
