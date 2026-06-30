@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         OKX Web3 DEX USDT 盈亏计算器 (含 Boost 计算、自动刷新与自动交易) 极简版
 // @namespace    http://tampermonkey.net/
-// @version      6.67_ScheduledAutoTrade
-// @description  使用订单接口统计 USDT 总交易额与净差，支持定时启动自动交易，并使用官方 Boost records 实时同步总 Boost 交易额与进度
+// @version      6.68_DefaultOpenCalculatorButton
+// @description  使用订单接口统计 USDT 总交易额与净差，默认保留打开USDT计算器入口，支持定时启动自动交易，并使用官方 Boost records 实时同步总 Boost 交易额与进度
 // @author       Dilemmmmmmma
 // @match        *://web3.okx.com/*
 // @match        *://web3.cnouxyex.co/*
@@ -35,7 +35,7 @@
     let compactChartContentEl = null;
     let isCompactPanelOpen = false;
     let isCompactPanelAutoOpened = false;
-    let isCompactPanelDismissed = false;
+    let isCompactPanelDismissed = true;
     let boostGroupRequestStarted = false;
     let boostMultiplierManuallyEdited = false;
     let lastBoostAutomation = null;
@@ -453,7 +453,7 @@
 
     function updateCompactPanelToggleState() {
         if (!compactPanelToggleEl) return;
-        compactPanelToggleEl.title = isCompactPanelOpen ? '返回 K 线' : '打开 USDT 计算器';
+        compactPanelToggleEl.title = isCompactPanelOpen ? '返回K线' : '打开USDT计算器';
         compactPanelToggleEl.setAttribute('aria-label', compactPanelToggleEl.title);
         compactPanelToggleEl.style.color = isCompactPanelOpen ? '#a5ff00' : '';
     }
