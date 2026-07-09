@@ -8,6 +8,23 @@
   const pendingCommands = new Map();
   let commandSequence = 0;
 
+  function isExtensionContextAlive() {
+    try {
+      return Boolean(chrome && chrome.runtime && chrome.runtime.id);
+    } catch {
+      return false;
+    }
+  }
+
+  function safeRuntimeSendMessage(message) {
+    if (!isExtensionContextAlive()) return Promise.resolve(null);
+    try {
+      return Promise.resolve(chrome.runtime.sendMessage(message)).catch(() => null);
+    } catch {
+      return Promise.resolve(null);
+    }
+  }
+
   function sendToEngine(command, payload = {}) {
     const id = `${Date.now()}-${++commandSequence}`;
 
@@ -34,10 +51,10 @@
     if (!data || data[CHANNEL_KEY] !== true) return;
 
     if (data.kind === 'state') {
-      chrome.runtime.sendMessage({
+      safeRuntimeSendMessage({
         type: 'OKX_BOOST_EXTENSION_STATE',
         state: data.payload
-      }).catch(() => {});
+      });
       return;
     }
 
@@ -50,13 +67,15 @@
     }
   });
 
-  chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-    if (message?.type !== 'OKX_BOOST_EXTENSION_COMMAND') return;
-    sendToEngine(message.command, message.payload)
-      .then(sendResponse)
-      .catch((error) => sendResponse({ ok: false, error: String(error?.message || error) }));
-    return true;
-  });
+  if (isExtensionContextAlive()) {
+    chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+      if (message?.type !== 'OKX_BOOST_EXTENSION_COMMAND') return;
+      sendToEngine(message.command, message.payload)
+        .then(sendResponse)
+        .catch((error) => sendResponse({ ok: false, error: String(error?.message || error) }));
+      return true;
+    });
+  }
 
-  chrome.runtime.sendMessage({ type: 'OKX_BOOST_BRIDGE_READY' }).catch(() => {});
+  safeRuntimeSendMessage({ type: 'OKX_BOOST_BRIDGE_READY' });
 })();
