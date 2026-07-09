@@ -1,8 +1,18 @@
 const OKX_HOSTS = new Set(['web3.okx.com', 'web3.cnouxyex.co']);
+const BINANCE_HOST = 'www.binance.com';
+
+function getWorkspaceForUrl(url) {
+  try {
+    const parsed = new URL(url);
+    if (OKX_HOSTS.has(parsed.hostname)) return 'boost';
+    if (parsed.hostname === BINANCE_HOST && parsed.pathname.startsWith('/zh-CN/alpha/')) return 'alpha';
+  } catch {}
+  return null;
+}
 
 function isSupportedUrl(url) {
   try {
-    return OKX_HOSTS.has(new URL(url).hostname);
+    return Boolean(getWorkspaceForUrl(url));
   } catch {
     return false;
   }
@@ -17,23 +27,27 @@ async function configureSidePanel(tabId, url) {
 }
 
 async function ensurePageEngine(tabId, url) {
-  if (!tabId || !isSupportedUrl(url)) {
-    return { ok: false, error: '当前不是受支持的 OKX Web3 页面' };
+  const workspace = getWorkspaceForUrl(url);
+  if (!tabId || !workspace) {
+    return { ok: false, error: '当前页面不支持交易助手' };
   }
+
+  const pageEngine = workspace === 'alpha' ? 'alpha-page-engine.js' : 'page-engine.js';
+  const contentBridge = workspace === 'alpha' ? 'alpha-content-bridge.js' : 'content-bridge.js';
 
   await chrome.scripting.executeScript({
     target: { tabId },
-    files: ['page-engine.js'],
+    files: [pageEngine],
     world: 'MAIN',
     injectImmediately: true
   });
   await chrome.scripting.executeScript({
     target: { tabId },
-    files: ['content-bridge.js'],
+    files: [contentBridge],
     injectImmediately: true
   });
 
-  return { ok: true };
+  return { ok: true, workspace };
 }
 
 chrome.runtime.onInstalled.addListener(() => {

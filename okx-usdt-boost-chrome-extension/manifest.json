@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "OKX Boost 交易助手",
-  "version": "1.0.4",
-  "description": "OKX Web3 DEX 的 Boost 交易统计、自动交易与侧边栏控制台。",
+  "name": "Boost & Alpha 交易助手",
+  "version": "1.1.0",
+  "description": "OKX Boost 与 Binance Alpha 的侧边栏交易工作台。",
   "minimum_chrome_version": "114",
   "permissions": [
     "activeTab",
@@ -12,10 +12,11 @@
   ],
   "host_permissions": [
     "https://web3.okx.com/*",
-    "https://web3.cnouxyex.co/*"
+    "https://web3.cnouxyex.co/*",
+    "https://www.binance.com/*"
   ],
   "action": {
-    "default_title": "打开 OKX Boost 交易助手"
+    "default_title": "打开 Boost & Alpha 交易助手"
   },
   "background": {
     "service_worker": "background.js",
@@ -43,6 +44,25 @@
       ],
       "js": [
         "content-bridge.js"
+      ],
+      "run_at": "document_start"
+    },
+    {
+      "matches": [
+        "https://www.binance.com/zh-CN/alpha/*"
+      ],
+      "js": [
+        "alpha-page-engine.js"
+      ],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "matches": [
+        "https://www.binance.com/zh-CN/alpha/*"
+      ],
+      "js": [
+        "alpha-content-bridge.js"
       ],
       "run_at": "document_start"
     }

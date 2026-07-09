@@ -10,10 +10,13 @@
     <main class="app-shell">
       <header class="topbar">
         <div>
-          <div class="brand">OKX <span>Web3</span></div>
-          <div class="product-name">Boost 交易助手</div>
+          <div class="brand">交易 <span>助手</span></div>
+          <div class="product-name">Boost & Alpha 工作台</div>
         </div>
-        <button id="refresh-button" class="icon-button" type="button" title="同步订单历史与 Boost 数据" aria-label="同步数据">↻</button>
+        <div class="header-actions">
+          <button id="workspace-switch" class="workspace-button" type="button">Alpha</button>
+          <button id="refresh-button" class="icon-button" type="button" title="同步当前工作台数据" aria-label="同步数据">↻</button>
+        </div>
       </header>
 
       <section class="context-bar" aria-live="polite">
@@ -21,6 +24,7 @@
         <div id="token-context" class="token-context">--</div>
       </section>
 
+      <div id="boost-workspace" class="workspace">
       <section class="section stats-section">
         <div class="section-heading">
           <span>USDT 交易统计 <small>(Boost榜无返佣)</small></span>
@@ -73,6 +77,47 @@
           <label class="toggle-row"><span>停止交易统计</span><input id="pause-stats-toggle" type="checkbox"><i></i></label>
         </div>
       </section>
+      </div>
+
+      <div id="alpha-workspace" class="workspace is-hidden">
+        <section class="section alpha-overview">
+          <div class="section-heading"><span>Alpha 交易量工具</span><span id="alpha-engine-status" class="source-label">--</span></div>
+          <div class="alpha-token-row"><strong id="alpha-token">--</strong><span id="alpha-market-trend">--</span></div>
+          <div class="metric-list">
+            <div class="metric-row"><span>今日成交</span><strong id="alpha-daily-volume">--</strong></div>
+            <div class="metric-row"><span>昨日成交</span><strong id="alpha-yesterday-volume">--</strong></div>
+            <div class="metric-row"><span>积分倍数</span><strong id="alpha-multiplier">--</strong></div>
+            <div class="metric-row"><span>交易总额</span><strong id="alpha-total">--</strong></div>
+            <div class="metric-row"><span>买入统计</span><strong id="alpha-buy">--</strong></div>
+            <div class="metric-row"><span>积分</span><strong id="alpha-integral">--</strong></div>
+            <div class="metric-row"><span>余额磨损</span><strong id="alpha-wear">--</strong></div>
+          </div>
+          <button id="alpha-run-button" class="primary-button binance-primary" type="button">启动 Alpha 交易</button>
+          <div id="alpha-run-status" class="status-line">等待 Binance Alpha 页面</div>
+        </section>
+
+        <section class="section alpha-settings">
+          <div class="section-heading"><span>交易参数</span><button id="alpha-clear-button" class="text-button" type="button">清除记录</button></div>
+          <div class="form-grid">
+            <label>目标交易额<input id="alpha-target" type="number" min="0" step="0.01" value="0"></label>
+            <label>卖出滑块(%)<input id="alpha-sell-slider" type="number" min="0" max="100" step="0.1" value="99.7"></label>
+            <label>买入滑块下限(%)<input id="alpha-buy-min" type="number" min="0" max="100" step="0.1" value="90"></label>
+            <label>买入滑块上限(%)<input id="alpha-buy-max" type="number" min="0" max="100" step="0.1" value="100"></label>
+            <label>随机循环最小(ms)<input id="alpha-cycle-min" type="number" min="100" step="50" value="300"></label>
+            <label>随机循环最大(ms)<input id="alpha-cycle-max" type="number" min="100" step="50" value="600"></label>
+            <label>买单等待(秒)<input id="alpha-buy-wait" type="number" min="1" step="1" value="10"></label>
+            <label>卖单等待(秒)<input id="alpha-sell-wait" type="number" min="1" step="1" value="10"></label>
+          </div>
+          <div class="toggle-list alpha-toggles">
+            <label class="toggle-row"><span>稳定监测</span><input id="alpha-stable-toggle" type="checkbox"><i></i></label>
+            <label class="toggle-row"><span>挂单监测</span><input id="alpha-order-monitor-toggle" type="checkbox"><i></i></label>
+            <label class="toggle-row"><span>反向订单</span><input id="alpha-reverse-toggle" type="checkbox"><i></i></label>
+            <label class="toggle-row"><span>波动限价</span><input id="alpha-volatility-toggle" type="checkbox"><i></i></label>
+          </div>
+          <button id="alpha-save-settings" class="secondary-button alpha-save" type="button">保存 Alpha 设置</button>
+          <div class="note alpha-security-note">身份验证器自动填充与外部 OTP 请求已禁用。</div>
+        </section>
+      </div>
 
       <footer id="footer-status" class="footer-status">准备就绪</footer>
     </main>
