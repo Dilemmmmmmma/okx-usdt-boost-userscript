@@ -6,7 +6,7 @@
   const REFRESH_INTERVAL_MS = 2500;
   let activeTabId = null;
   let activePageKind = null;
-  let activeWorkspace = localStorage.getItem('trade-assistant-workspace') || 'boost';
+  let activeWorkspace = localStorage.getItem('trade-assistant-workspace') === 'alpha' ? 'alpha' : 'boost';
   let currentBoostState = null;
   let currentAlphaState = null;
   let loadedBoostForm = false;
@@ -99,11 +99,21 @@
     $('boost-workspace').classList.toggle('is-hidden', !isBoost);
     $('alpha-workspace').classList.toggle('is-hidden', isBoost);
     $('workspace-switch').textContent = isBoost ? 'Alpha' : 'Boost';
+    document.body.classList.toggle('theme-alpha', !isBoost);
+    document.body.classList.toggle('theme-boost', isBoost);
   }
 
-  function applyPageTheme(pageKind) {
-    document.body.classList.toggle('theme-alpha', pageKind === 'alpha');
-    document.body.classList.toggle('theme-boost', pageKind !== 'alpha');
+  function workspaceName(workspace = activeWorkspace) {
+    return workspace === 'alpha' ? 'Binance Alpha' : 'OKX Boost';
+  }
+
+  function setWorkspaceUnavailable() {
+    const name = workspaceName();
+    setConnection(false, `当前不是 ${name} 页面`);
+    $('token-context').textContent = `请切换到 ${name} 页面`;
+    setBoostControlsReady(false);
+    setAlphaControlsReady(false);
+    setFooter(`当前为 ${name} 模式，请切换到对应页面后使用`, true);
   }
 
   function switchWorkspace() {
@@ -111,12 +121,9 @@
     localStorage.setItem('trade-assistant-workspace', activeWorkspace);
     renderWorkspace();
     if (activeWorkspace !== activePageKind) {
-      const name = activeWorkspace === 'alpha' ? 'Binance Alpha' : 'OKX Web3';
-      setFooter(`请切换到 ${name} 页面以使用当前工作台`);
-    } else if (activeWorkspace === 'alpha') {
-      renderAlphaState(currentAlphaState);
+      setWorkspaceUnavailable();
     } else {
-      renderBoostState(currentBoostState);
+      refreshActiveTab().catch(() => {});
     }
   }
 
@@ -317,7 +324,6 @@
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
       activeTabId = tab?.id || null;
       activePageKind = pageKindFromUrl(tab?.url || '');
-      applyPageTheme(activePageKind);
       loadedBoostForm = false;
       loadedAlphaForm = false;
       if (!activePageKind) {
@@ -329,9 +335,11 @@
         return;
       }
 
-      activeWorkspace = activePageKind;
-      localStorage.setItem('trade-assistant-workspace', activeWorkspace);
       renderWorkspace();
+      if (activeWorkspace !== activePageKind) {
+        setWorkspaceUnavailable();
+        return;
+      }
       setConnection(false, '正在连接页面交易引擎');
       const ensured = await chrome.runtime.sendMessage({ type: 'OKX_BOOST_ENSURE_ENGINE', tabId: activeTabId });
       if (!ensured?.ok) {
@@ -352,7 +360,14 @@
 
   function bindEvents() {
     $('workspace-switch').addEventListener('click', switchWorkspace);
-    $('refresh-button').addEventListener('click', () => activePageKind === 'alpha' ? sendAlpha('alpha-refresh') : sendBoost('refresh'));
+    $('refresh-button').addEventListener('click', () => {
+      if (activeWorkspace !== activePageKind) {
+        setWorkspaceUnavailable();
+        return;
+      }
+      if (activeWorkspace === 'alpha') sendAlpha('alpha-refresh');
+      else sendBoost('refresh');
+    });
     $('auto-trade-button').addEventListener('click', () => sendBoost('toggle-auto-trade'));
     $('schedule-button').addEventListener('click', () => {
       const scheduled = Number(currentBoostState?.auto?.scheduledRemainingMs) > 0;
@@ -399,7 +414,8 @@
   renderWorkspace();
   refreshActiveTab().catch(() => {});
   window.setInterval(() => {
-    if (activePageKind === 'alpha') sendAlpha('alpha-get-state', {}, true);
-    if (activePageKind === 'boost') sendBoost('get-state', {}, true);
+    if (activeWorkspace !== activePageKind) return;
+    if (activeWorkspace === 'alpha') sendAlpha('alpha-get-state', {}, true);
+    if (activeWorkspace === 'boost') sendBoost('get-state', {}, true);
   }, REFRESH_INTERVAL_MS);
 })();
