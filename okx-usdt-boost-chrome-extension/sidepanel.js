@@ -13,6 +13,8 @@
   let loadedAlphaForm = false;
   let boostAutosaveTimerId = null;
   let alphaAutosaveTimerId = null;
+  let alphaSettingsRevision = 0;
+  let alphaSettingsDirty = false;
 
   const $ = (id) => document.getElementById(id);
 
@@ -149,21 +151,37 @@
     return sendBoost('save-settings', getBoostPayload(), quiet);
   }
 
-  function saveAlphaSettings(quiet = true) {
-    return sendAlpha('alpha-save-settings', getAlphaPayload(), quiet);
+  function saveAlphaSettings(quiet = true, renderResponse = false) {
+    return sendAlpha('alpha-save-settings', getAlphaPayload(), quiet, renderResponse);
   }
 
   function scheduleBoostAutosave() {
     window.clearTimeout(boostAutosaveTimerId);
-    boostAutosaveTimerId = window.setTimeout(() => saveBoostSettings(true), 250);
+    boostAutosaveTimerId = window.setTimeout(async () => {
+      const result = await saveBoostSettings(true);
+      if (!result) setFooter('Boost 设置同步失败，请刷新页面后重试', true);
+    }, 250);
   }
 
   function scheduleAlphaAutosave() {
+    const revision = ++alphaSettingsRevision;
+    alphaSettingsDirty = true;
     window.clearTimeout(alphaAutosaveTimerId);
     alphaAutosaveTimerId = window.setTimeout(async () => {
-      const result = await saveAlphaSettings(true);
-      if (result) $('alpha-settings-status').textContent = '参数与开关已实时生效';
+      const result = await saveAlphaSettings(true, false);
+      if (revision !== alphaSettingsRevision) return;
+      alphaSettingsDirty = false;
+      if (result?.state) renderAlphaState(result.state);
+      else setFooter('Alpha 设置同步失败，请刷新页面后重试', true);
     }, 250);
+  }
+
+  function friendlyError(error) {
+    const message = String(error?.message || error || '无法连接页面交易引擎');
+    if (/Receiving end does not exist|Extension context invalidated|message port closed/i.test(message)) {
+      return '扩展已更新，请刷新当前页面后重试';
+    }
+    return message;
   }
 
   function renderBoostState(state) {
@@ -194,13 +212,13 @@
     setMetric('rebate-adjusted-wear', paused ? '--' : stats.sellSyncPending ? '同步中' : formatSigned(fee.rebateAdjustedWear), paused || stats.sellSyncPending ? 'pending' : toneForValue(fee.rebateAdjustedWear));
     setMetric('boost-progress', paused ? '已停止' : dailyTarget > 0 ? `${formatNumber(stats.boostProgress, 2)} / ${formatNumber(dailyTarget, 2)}` : formatNumber(stats.boostProgress, 2), !paused && dailyTarget > 0 && Number(stats.boostProgress) >= dailyTarget ? 'positive' : '');
 
-    $('auto-trade-button').textContent = state.auto?.running ? '停止自动交易' : '开启自动交易';
+    $('auto-trade-button').textContent = state.auto?.running ? '停止 Boost 交易' : '启动 Boost 交易';
     $('auto-trade-button').classList.toggle('running', Boolean(state.auto?.running));
     $('auto-status').textContent = state.auto?.status || '未启动';
     setMetric('boost-balance', boost.avgBalance === undefined ? '--' : formatNumber(boost.avgBalance, 2), Number(boost.avgBalance) >= 200 ? 'positive' : '');
     setMetric('boost-trading-volume', boost.avgTradingVolume === undefined ? '--' : formatNumber(boost.avgTradingVolume, 2), Number(boost.avgTradingVolume) >= 500 ? 'positive' : '');
     setMetric('boost-rolling-total', boost.rollingTotal === undefined ? '--' : formatNumber(boost.rollingTotal, 2));
-    $('boost-expiry').textContent = boost.nextExpiry ? `下次断档：${new Date(boost.nextExpiry.expireAt).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false })}` : boost.accountIdAvailable ? 'Boost records 已同步。' : '访问 Boost 记录页后会自动识别 accountId。';
+    $('boost-expiry').textContent = boost.nextExpiry ? `下次断档：${new Date(boost.nextExpiry.expireAt).toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false })}` : boost.accountIdAvailable ? 'Boost 记录已同步。' : '访问 Boost 记录页后会自动识别 accountId。';
 
     if (state.ready && !loadedBoostForm) {
       setInputValue('rebate-percent', state.settings?.rebatePercent, true);
@@ -235,7 +253,6 @@
       setAlphaControlsReady(ready);
     }
 
-    $('alpha-engine-status').textContent = state.running ? '运行中' : state.mfaAutomationDisabled ? 'MFA 已禁用' : '--';
     $('alpha-token').textContent = state.token || '--';
     $('alpha-market-trend').textContent = [state.market?.range, state.market?.direction].filter(Boolean).join(' · ') || '--';
     setMetric('alpha-daily-volume', state.market?.dailyVolume || '--');
@@ -260,66 +277,77 @@
       setInputValue('alpha-sell-wait', settings.sellOrderWaitSec, true);
       loadedAlphaForm = true;
     }
-    $('alpha-stable-toggle').checked = Boolean(controls.stableDetectEnabled);
-    $('alpha-order-monitor-toggle').checked = Boolean(controls.orderMonitorEnabled);
-    $('alpha-reverse-toggle').checked = Boolean(controls.reverseOrderEnabled);
-    $('alpha-volatility-toggle').checked = Boolean(controls.volatilityLimitEnabled);
+    if (!alphaSettingsDirty) {
+      $('alpha-stable-toggle').checked = Boolean(controls.stableDetectEnabled);
+      $('alpha-order-monitor-toggle').checked = Boolean(controls.orderMonitorEnabled);
+      $('alpha-reverse-toggle').checked = Boolean(controls.reverseOrderEnabled);
+      $('alpha-volatility-toggle').checked = Boolean(controls.volatilityLimitEnabled);
+    }
     if (activeWorkspace === 'alpha') setFooter(legacy ? '请停用旧 Alpha 篡改猴脚本后再启动扩展' : state.running ? 'Alpha 自动交易运行中' : 'Alpha 工作台已就绪', legacy);
   }
 
-  async function sendToEngine(type, command, payload = {}, quiet = false) {
+  async function sendToEngine(type, command, payload = {}, quiet = false, renderResponse = true) {
     if (!activeTabId) return null;
     let lastError = null;
     for (let attempt = 0; attempt < 3; attempt += 1) {
       try {
         const response = await chrome.tabs.sendMessage(activeTabId, { type, command, payload });
         if (!response?.ok) throw new Error(response?.error || '页面交易引擎未准备好');
-        if (response.state) (type === 'ALPHA_VOLUME_EXTENSION_COMMAND' ? renderAlphaState : renderBoostState)(response.state);
+        if (response.state && renderResponse) (type === 'ALPHA_VOLUME_EXTENSION_COMMAND' ? renderAlphaState : renderBoostState)(response.state);
         return response;
       } catch (error) {
         lastError = error;
         if (attempt < 2) await new Promise((resolve) => window.setTimeout(resolve, 250));
       }
     }
-    if (!quiet) setFooter(lastError?.message || '无法连接页面交易引擎', true);
+    if (!quiet) setFooter(friendlyError(lastError), true);
     return null;
   }
 
-  function sendBoost(command, payload, quiet) {
-    return sendToEngine('OKX_BOOST_EXTENSION_COMMAND', command, payload, quiet);
+  function sendBoost(command, payload, quiet, renderResponse) {
+    return sendToEngine('OKX_BOOST_EXTENSION_COMMAND', command, payload, quiet, renderResponse);
   }
 
-  function sendAlpha(command, payload, quiet) {
-    return sendToEngine('ALPHA_VOLUME_EXTENSION_COMMAND', command, payload, quiet);
+  function sendAlpha(command, payload, quiet, renderResponse) {
+    return sendToEngine('ALPHA_VOLUME_EXTENSION_COMMAND', command, payload, quiet, renderResponse);
   }
 
   async function refreshActiveTab() {
-    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-    activeTabId = tab?.id || null;
-    activePageKind = pageKindFromUrl(tab?.url || '');
-    applyPageTheme(activePageKind);
-    loadedBoostForm = false;
-    loadedAlphaForm = false;
-    if (!activePageKind) {
-      setConnection(false, '请切换到 OKX 或 Binance Alpha 页面');
-      $('token-context').textContent = '当前页面不支持';
+    try {
+      const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+      activeTabId = tab?.id || null;
+      activePageKind = pageKindFromUrl(tab?.url || '');
+      applyPageTheme(activePageKind);
+      loadedBoostForm = false;
+      loadedAlphaForm = false;
+      if (!activePageKind) {
+        setConnection(false, '请切换到 OKX 或 Binance Alpha 页面');
+        $('token-context').textContent = '当前页面不支持';
+        setBoostControlsReady(false);
+        setAlphaControlsReady(false);
+        setFooter('支持 web3.okx.com、web3.cnouxyex.co 和 Binance Alpha');
+        return;
+      }
+
+      activeWorkspace = activePageKind;
+      localStorage.setItem('trade-assistant-workspace', activeWorkspace);
+      renderWorkspace();
+      setConnection(false, '正在连接页面交易引擎');
+      const ensured = await chrome.runtime.sendMessage({ type: 'OKX_BOOST_ENSURE_ENGINE', tabId: activeTabId });
+      if (!ensured?.ok) {
+        setFooter(friendlyError(ensured?.error || '无法注入页面交易引擎'), true);
+        return;
+      }
+      if (activePageKind === 'alpha') await sendAlpha('alpha-get-state', {}, true);
+      else await sendBoost('get-state', {}, true);
+    } catch (error) {
+      activeTabId = null;
+      activePageKind = null;
+      setConnection(false, '扩展连接已中断');
       setBoostControlsReady(false);
       setAlphaControlsReady(false);
-      setFooter('支持 web3.okx.com、web3.cnouxyex.co 和 Binance Alpha');
-      return;
+      setFooter(friendlyError(error), true);
     }
-
-    activeWorkspace = activePageKind;
-    localStorage.setItem('trade-assistant-workspace', activeWorkspace);
-    renderWorkspace();
-    setConnection(false, '正在连接页面交易引擎');
-    const ensured = await chrome.runtime.sendMessage({ type: 'OKX_BOOST_ENSURE_ENGINE', tabId: activeTabId });
-    if (!ensured?.ok) {
-      setFooter(ensured?.error || '无法注入页面交易引擎', true);
-      return;
-    }
-    if (activePageKind === 'alpha') await sendAlpha('alpha-get-state', {}, true);
-    else await sendBoost('get-state', {}, true);
   }
 
   function bindEvents() {
@@ -332,7 +360,9 @@
     });
     $('alarm-toggle').addEventListener('change', (event) => sendBoost('set-alarm', { enabled: event.target.checked }));
     $('pause-stats-toggle').addEventListener('change', (event) => sendBoost('set-trade-stats-paused', { enabled: event.target.checked }));
-    $('open-records-button').addEventListener('click', () => chrome.runtime.sendMessage({ type: 'OKX_BOOST_OPEN_RECORDS' }));
+    $('open-records-button').addEventListener('click', () => {
+      chrome.runtime.sendMessage({ type: 'OKX_BOOST_OPEN_RECORDS' }).catch((error) => setFooter(friendlyError(error), true));
+    });
     $('alpha-run-button').addEventListener('click', async () => {
       if (!currentAlphaState?.running) {
         const saved = await saveAlphaSettings();

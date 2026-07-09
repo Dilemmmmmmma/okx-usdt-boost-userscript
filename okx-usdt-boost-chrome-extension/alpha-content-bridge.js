@@ -30,7 +30,7 @@
 
   function sendToEngine(command, payload = {}) {
     if (!isExtensionContextAlive()) {
-      return Promise.resolve({ ok: false, error: 'Extension updated. Refresh the current Binance Alpha page.' });
+      return Promise.resolve({ ok: false, error: '扩展已更新，请刷新当前 Binance Alpha 页面' });
     }
 
     const id = `${Date.now()}-${++commandSequence}`;
@@ -39,13 +39,13 @@
       let timeoutId = null;
       try {
         if (!isExtensionContextAlive()) {
-          resolve({ ok: false, error: 'Extension updated. Refresh the current Binance Alpha page.' });
+          resolve({ ok: false, error: '扩展已更新，请刷新当前 Binance Alpha 页面' });
           return;
         }
 
         timeoutId = window.setTimeout(() => {
           pendingCommands.delete(id);
-          resolve({ ok: false, error: 'Alpha page engine did not respond. Refresh the Binance Alpha page and retry.' });
+          resolve({ ok: false, error: 'Alpha 页面交易引擎未响应，请刷新页面后重试' });
         }, 8000);
 
         pendingCommands.set(id, { resolve, timeoutId });
@@ -60,7 +60,7 @@
         if (timeoutId) window.clearTimeout(timeoutId);
         pendingCommands.delete(id);
         bridgeActive = false;
-        resolve({ ok: false, error: 'Extension updated. Refresh the current Binance Alpha page.' });
+        resolve({ ok: false, error: '扩展已更新，请刷新当前 Binance Alpha 页面' });
       }
     });
   }

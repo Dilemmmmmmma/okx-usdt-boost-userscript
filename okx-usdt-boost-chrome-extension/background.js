@@ -62,12 +62,12 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
 
 chrome.action.onClicked.addListener(async (tab) => {
   if (!tab.id || !isSupportedUrl(tab.url || '')) return;
-  await chrome.sidePanel.open({ tabId: tab.id });
+  await chrome.sidePanel.open({ tabId: tab.id }).catch(() => {});
 });
 
 chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
   if (message?.type === 'OKX_BOOST_OPEN_RECORDS') {
-    chrome.tabs.create({ url: 'https://web3.okx.com/zh-hans/boost/records' });
+    chrome.tabs.create({ url: 'https://web3.okx.com/zh-hans/boost/records' }).catch(() => {});
     return;
   }
 

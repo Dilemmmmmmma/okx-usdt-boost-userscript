@@ -168,8 +168,6 @@ button, input { font: inherit; }
 .alpha-token-row { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 10px; }
 .alpha-token-row strong { color: var(--accent); font-size: 16px; }
 .alpha-token-row span { max-width: 55%; color: var(--muted); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; text-align: right; }
-.alpha-save { width: 100%; margin-top: 10px; }
-.alpha-security-note { color: var(--muted); }
 .footer-status { padding-top: 12px; color: #848e9c; font-size: 10px; }
 .footer-status.error { color: var(--danger); }
 

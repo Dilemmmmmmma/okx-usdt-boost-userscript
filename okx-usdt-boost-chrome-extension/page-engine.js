@@ -824,8 +824,8 @@
                 <div class="okx-calc-row"><span title="总Boost交易额 / Boost倍数 × (返佣比例 - 固定返利20%) × 未加成基础倍数%">实际返佣</span><span id="usdt-estimated-rebate" class="okx-calc-value">--</span></div>
                 <div class="okx-calc-row"><span>USDT 净差</span><span id="usdt-net" class="okx-calc-value">0.0000</span></div>
                 <div class="okx-calc-row"><span title="USDT净差 + 当前交易量对应的实际返佣">返佣后磨损</span><span id="usdt-rebate-adjusted-wear" class="okx-calc-value">--</span></div>
-                <div class="okx-calc-row"><span title="官方 Boost records 今日 tradingVolume / 10；接口异常时回退到本地订单估算">Boost交易量进度</span><span id="boost-weighted-progress" class="okx-calc-value">0.00</span></div>
-                <button id="btn-auto-trade" class="okx-calc-action okx-calc-action-primary">开启自动交易</button>
+                <div class="okx-calc-row"><span title="官方 Boost 记录当日交易量 / 10；接口异常时回退到本地订单估算">Boost交易量进度</span><span id="boost-weighted-progress" class="okx-calc-value">0.00</span></div>
+                <button id="btn-auto-trade" class="okx-calc-action okx-calc-action-primary">启动 Boost 交易</button>
                 <div id="auto-trade-status" class="okx-calc-status">未启动</div>
             </div>
 
@@ -862,7 +862,7 @@
                         买入序号
                         <input type="number" min="1" step="1" id="buy-option-index" value="3">
                     </label>
-                    <label title="倒计时结束后自动开启自动交易">
+                        <label title="倒计时结束后自动启动 Boost 交易">
                         定时启动(分钟)
                         <input type="number" min="1" step="1" id="auto-trade-delay-minutes" value="10">
                     </label>
@@ -2368,7 +2368,7 @@
     function setAutoTradeButtonRunning() {
         const btn = document.getElementById('btn-auto-trade');
         if (btn) {
-            btn.textContent = '停止自动交易';
+            btn.textContent = '停止 Boost 交易';
             btn.style.background = '#351520';
             btn.style.color = '#fc46ab';
         }
@@ -2377,7 +2377,7 @@
     function setAutoTradeButtonStopped() {
         const btn = document.getElementById('btn-auto-trade');
         if (btn) {
-            btn.textContent = '开启自动交易';
+            btn.textContent = '启动 Boost 交易';
             btn.style.background = '#a5ff00';
             btn.style.color = '#0e0e0e';
         }

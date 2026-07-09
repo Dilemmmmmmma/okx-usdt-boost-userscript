@@ -5046,10 +5046,9 @@ let stableMaxLagSec = STABLE_MAX_LAG_SEC_CONST;
 
   function alphaExtensionState() {
     return {
-      version: '1.1.2',
+      version: '1.1.3',
       ready: Boolean(inputAmount && btnStart),
       legacyUserscriptDetected: alphaHasVisibleLegacyPanel(),
-      mfaAutomationDisabled: true,
       status: alphaExtensionStatus,
       url: window.location.href,
       running,
@@ -5117,12 +5116,12 @@ let stableMaxLagSec = STABLE_MAX_LAG_SEC_CONST;
     }
   }
 
-  let alphaExtensionStatus = 'Ready';
+  let alphaExtensionStatus = '准备就绪';
 
   async function handleAlphaExtensionCommand(command, payload = {}) {
-    if (!inputAmount) return { ok: false, error: 'Alpha page engine is loading' };
+    if (!inputAmount) return { ok: false, error: 'Alpha 页面交易引擎正在加载' };
     if (alphaHasVisibleLegacyPanel() && command === 'alpha-toggle-run') {
-      return { ok: false, error: 'Legacy Alpha userscript detected. Disable it before starting the extension.' };
+      return { ok: false, error: '检测到旧版 Alpha 篡改猴脚本，请停用后再启动扩展' };
     }
 
     switch (command) {
@@ -5131,16 +5130,16 @@ let stableMaxLagSec = STABLE_MAX_LAG_SEC_CONST;
       case 'alpha-toggle-run':
         if (running) {
           stop();
-          alphaExtensionStatus = 'Stopped';
+          alphaExtensionStatus = '已停止';
           return { ok: true, state: alphaExtensionState() };
         }
         if (!(parseFloat(inputAmount.value) > 0)) {
-          alphaExtensionStatus = 'Set a target amount greater than 0 before starting';
+          alphaExtensionStatus = '请先填写大于 0 的目标交易额';
           return { ok: true, state: alphaExtensionState() };
         }
-        alphaExtensionStatus = 'Starting Alpha trade flow';
+        alphaExtensionStatus = '正在启动 Alpha 交易';
         start();
-        alphaExtensionStatus = running ? 'Alpha auto trade running' : 'Alpha did not start. Check the target and trading panel.';
+        alphaExtensionStatus = running ? 'Alpha 自动交易运行中' : 'Alpha 未能启动，请检查目标交易额和交易面板';
         return { ok: true, state: alphaExtensionState() };
       case 'alpha-save-settings':
         alphaSetInput(inputAmount, payload.target);
@@ -5156,7 +5155,7 @@ let stableMaxLagSec = STABLE_MAX_LAG_SEC_CONST;
         alphaSetCheckbox(reverseOrderCheckbox, payload.reverseOrderEnabled);
         alphaSetCheckbox(volatilityLimitCheckbox, payload.volatilityLimitEnabled);
         renewData();
-        alphaExtensionStatus = 'Settings applied';
+        alphaExtensionStatus = '设置已生效';
         return { ok: true, state: alphaExtensionState() };
       case 'alpha-clear-records':
         LifecycleManager.clearRecords();
@@ -5166,7 +5165,7 @@ let stableMaxLagSec = STABLE_MAX_LAG_SEC_CONST;
         await UIUpdater.updateDailyVolumeUI();
         return { ok: true, state: alphaExtensionState() };
       default:
-        return { ok: false, error: `Unknown Alpha command: ${String(command || '')}` };
+        return { ok: false, error: `未知 Alpha 指令：${String(command || '')}` };
     }
   }
 
