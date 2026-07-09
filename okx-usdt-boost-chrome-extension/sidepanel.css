@@ -71,6 +71,14 @@ button, input { font: inherit; }
 .section-heading { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 10px; color: #eee; font-size: 13px; font-weight: 600; }
 .section-heading small { color: var(--muted); font-size: 10px; font-weight: 400; }
 .source-label { max-width: 44%; color: var(--muted); font-size: 10px; font-weight: 500; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; text-align: right; }
+.automation-hint {
+  margin: -4px 0 10px;
+  color: var(--accent);
+  font-size: 10px;
+  line-height: 16px;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
 
 .metric-list { display: grid; gap: 5px; }
 .metric-row { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; min-height: 18px; color: var(--muted); }
