@@ -1,0 +1,49 @@
+{
+  "manifest_version": 3,
+  "name": "OKX Boost 交易助手",
+  "version": "1.0.0",
+  "description": "OKX Web3 DEX 的 Boost 交易统计、自动交易与侧边栏控制台。",
+  "minimum_chrome_version": "114",
+  "permissions": [
+    "activeTab",
+    "sidePanel",
+    "tabs"
+  ],
+  "host_permissions": [
+    "https://web3.okx.com/*",
+    "https://web3.cnouxyex.co/*"
+  ],
+  "action": {
+    "default_title": "打开 OKX Boost 交易助手"
+  },
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "side_panel": {
+    "default_path": "sidepanel.html"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://web3.okx.com/*",
+        "https://web3.cnouxyex.co/*"
+      ],
+      "js": [
+        "page-engine.js"
+      ],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "matches": [
+        "https://web3.okx.com/*",
+        "https://web3.cnouxyex.co/*"
+      ],
+      "js": [
+        "content-bridge.js"
+      ],
+      "run_at": "document_start"
+    }
+  ]
+}

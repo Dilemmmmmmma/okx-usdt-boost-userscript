@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>OKX Boost 交易助手</title>
+    <link rel="stylesheet" href="sidepanel.css">
+  </head>
+  <body>
+    <main class="app-shell">
+      <header class="topbar">
+        <div>
+          <div class="brand">OKX <span>Web3</span></div>
+          <div class="product-name">Boost 交易助手</div>
+        </div>
+        <button id="refresh-button" class="icon-button" type="button" title="同步订单历史与 Boost 数据" aria-label="同步数据">↻</button>
+      </header>
+
+      <section class="context-bar" aria-live="polite">
+        <div class="connection"><span id="connection-dot" class="dot"></span><span id="connection-text">等待连接 OKX 页面</span></div>
+        <div id="token-context" class="token-context">--</div>
+      </section>
+
+      <section class="section stats-section">
+        <div class="section-heading">
+          <span>USDT 交易统计 <small>(Boost榜无返佣)</small></span>
+          <span id="summary-source" class="source-label">--</span>
+        </div>
+        <div class="metric-list">
+          <div class="metric-row"><span>总交易额</span><strong id="order-history-total">--</strong></div>
+          <div class="metric-row"><span>总 Boost 交易额</span><strong id="boost-total">--</strong></div>
+          <div class="metric-row"><span>预估手续费</span><strong id="estimated-fee">--</strong></div>
+          <div class="metric-row"><span>实际返佣</span><strong id="actual-rebate">--</strong></div>
+          <div class="metric-row"><span>USDT 净差</span><strong id="net-difference">--</strong></div>
+          <div class="metric-row"><span>返佣后磨损</span><strong id="rebate-adjusted-wear">--</strong></div>
+          <div class="metric-row"><span>Boost 交易量进度</span><strong id="boost-progress">--</strong></div>
+        </div>
+        <button id="auto-trade-button" class="primary-button" type="button">开启自动交易</button>
+        <div id="auto-status" class="status-line">等待页面数据</div>
+      </section>
+
+      <section class="section boost-section">
+        <div class="section-heading">
+          <span>Boost 数据记录</span>
+          <button id="open-records-button" class="text-button" type="button">记录页</button>
+        </div>
+        <div class="metric-list">
+          <div class="metric-row"><span>Boost 余额</span><strong id="boost-balance">--</strong></div>
+          <div class="metric-row"><span>Boost 交易量</span><strong id="boost-trading-volume">--</strong></div>
+          <div class="metric-row"><span>当前 10 日合计</span><strong id="boost-rolling-total">--</strong></div>
+        </div>
+        <div id="boost-expiry" class="note">访问 Boost 记录页后会自动识别 accountId。</div>
+      </section>
+
+      <section class="section settings-section">
+        <div class="section-heading"><span>设置</span><span id="automation-hint" class="source-label">--</span></div>
+        <div class="form-grid">
+          <label>返佣比例(%)<input id="rebate-percent" type="number" min="0" step="0.01"></label>
+          <label>固定比例(%)<input id="fixed-percent" type="number" disabled></label>
+          <label>日均交易量<input id="boost-daily" type="number" min="1" step="0.01"></label>
+          <label>Boost 倍数<input id="boost-multiplier" type="number" min="0" step="0.01"></label>
+          <label>买入序号<input id="buy-option-index" type="number" min="1" step="1"></label>
+          <label>定时启动(分钟)<input id="schedule-minutes" type="number" min="1" step="1"></label>
+        </div>
+        <div class="settings-actions">
+          <button id="save-settings-button" class="secondary-button" type="button">保存设置</button>
+          <button id="schedule-button" class="secondary-button" type="button">开始倒计时</button>
+        </div>
+        <div id="schedule-status" class="status-line">定时启动未设置</div>
+        <div class="toggle-list">
+          <label class="toggle-row"><span>达到目标后提醒并停止</span><input id="alarm-toggle" type="checkbox"><i></i></label>
+          <label class="toggle-row"><span>停止交易统计</span><input id="pause-stats-toggle" type="checkbox"><i></i></label>
+        </div>
+      </section>
+
+      <footer id="footer-status" class="footer-status">准备就绪</footer>
+    </main>
+    <script src="sidepanel.js"></script>
+  </body>
+</html>
