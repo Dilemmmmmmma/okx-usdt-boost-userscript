@@ -97,6 +97,11 @@
     $('workspace-switch').textContent = isBoost ? 'Alpha' : 'Boost';
   }
 
+  function applyPageTheme(pageKind) {
+    document.body.classList.toggle('theme-alpha', pageKind === 'alpha');
+    document.body.classList.toggle('theme-boost', pageKind !== 'alpha');
+  }
+
   function switchWorkspace() {
     activeWorkspace = activeWorkspace === 'boost' ? 'alpha' : 'boost';
     localStorage.setItem('trade-assistant-workspace', activeWorkspace);
@@ -269,6 +274,7 @@
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     activeTabId = tab?.id || null;
     activePageKind = pageKindFromUrl(tab?.url || '');
+    applyPageTheme(activePageKind);
     loadedBoostForm = false;
     loadedAlphaForm = false;
     if (!activePageKind) {
