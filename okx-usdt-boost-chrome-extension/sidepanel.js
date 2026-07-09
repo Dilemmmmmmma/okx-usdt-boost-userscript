@@ -8,15 +8,6 @@
   let loadedFormState = false;
 
   const $ = (id) => document.getElementById(id);
-  const formIds = [
-    'rebate-percent',
-    'fixed-percent',
-    'boost-daily',
-    'boost-multiplier',
-    'buy-option-index',
-    'schedule-minutes'
-  ];
-
   function isSupportedUrl(url) {
     try {
       return OKX_HOSTS.has(new URL(url).hostname);
@@ -106,6 +97,26 @@
     $('connection-text').textContent = message;
   }
 
+  function setControlsReady(ready) {
+    const ids = [
+      'auto-trade-button',
+      'refresh-button',
+      'save-settings-button',
+      'schedule-button',
+      'alarm-toggle',
+      'pause-stats-toggle',
+      'rebate-percent',
+      'boost-daily',
+      'boost-multiplier',
+      'buy-option-index',
+      'schedule-minutes'
+    ];
+    ids.forEach((id) => {
+      const element = $(id);
+      if (element) element.disabled = !ready;
+    });
+  }
+
   function renderState(state) {
     if (!state) return;
     currentState = state;
@@ -116,7 +127,10 @@
     const boost = state.boost || {};
     const token = state.token;
 
-    setConnection(Boolean(state.ready), state.ready ? '已连接 OKX 页面' : '页面交易引擎加载中');
+    const legacyUserscriptDetected = Boolean(state.legacyUserscriptDetected);
+    setConnection(Boolean(state.ready) && !legacyUserscriptDetected,
+      legacyUserscriptDetected ? '检测到旧篡改猴脚本' : state.ready ? '已连接 OKX 页面' : '页面交易引擎加载中');
+    setControlsReady(Boolean(state.ready) && !legacyUserscriptDetected);
     $('token-context').textContent = token ? `${token.chainSlug} · ${token.tokenAddress.slice(0, 6)}...${token.tokenAddress.slice(-4)}` : '非代币详情页';
     $('summary-source').textContent = paused
       ? '统计停止'
@@ -153,7 +167,7 @@
         ? 'Boost records 已同步，当前无待补接交易量。'
         : '访问 Boost 记录页后会自动识别 accountId。';
 
-    if (!loadedFormState) {
+    if (state.ready && !loadedFormState) {
       setInputFromState('rebate-percent', state.settings?.rebatePercent, true);
       setInputFromState('fixed-percent', state.settings?.fixedInviteRebatePercent, true);
       setInputFromState('boost-daily', state.settings?.boostDaily, true);
@@ -173,7 +187,9 @@
     $('schedule-status').textContent = scheduled
       ? `将在 ${formatCountdown(state.auto.scheduledRemainingMs)} 后启动自动交易`
       : '定时启动未设置';
-    setFooter(state.auto?.status || '准备就绪');
+    setFooter(legacyUserscriptDetected
+      ? '请停用旧篡改猴脚本，避免两个自动交易引擎同时运行'
+      : state.auto?.status || '准备就绪', legacyUserscriptDetected);
   }
 
   async function refreshActiveTab() {
@@ -189,6 +205,12 @@
     }
     setConnection(false, '正在连接页面交易引擎');
     $('token-context').textContent = '读取代币信息中';
+    setControlsReady(false);
+    const ensured = await chrome.runtime.sendMessage({ type: 'OKX_BOOST_ENSURE_ENGINE', tabId: activeTabId });
+    if (!ensured?.ok) {
+      setFooter(ensured?.error || '无法注入页面交易引擎', true);
+      return;
+    }
     await sendCommand('get-state', {}, true);
   }
 
@@ -198,16 +220,25 @@
       return null;
     }
 
-    try {
-      const response = await chrome.tabs.sendMessage(activeTabId, {
-        type: 'OKX_BOOST_EXTENSION_COMMAND',
-        command,
-        payload
-      });
-      if (!response?.ok) throw new Error(response?.error || '页面交易引擎未准备好');
-      if (response.state) renderState(response.state);
-      return response;
-    } catch (error) {
+    let lastError = null;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try {
+        const response = await chrome.tabs.sendMessage(activeTabId, {
+          type: 'OKX_BOOST_EXTENSION_COMMAND',
+          command,
+          payload
+        });
+        if (!response?.ok) throw new Error(response?.error || '页面交易引擎未准备好');
+        if (response.state) renderState(response.state);
+        return response;
+      } catch (error) {
+        lastError = error;
+        if (attempt < 2) await new Promise((resolve) => window.setTimeout(resolve, 250));
+      }
+    }
+
+    {
+      const error = lastError;
       if (!quiet) {
         setConnection(false, '未连接页面交易引擎');
         setFooter(error?.message || '请求失败，请刷新 OKX 页面后重试', true);

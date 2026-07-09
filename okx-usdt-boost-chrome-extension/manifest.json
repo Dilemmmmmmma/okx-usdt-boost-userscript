@@ -1,12 +1,13 @@
 {
   "manifest_version": 3,
   "name": "OKX Boost 交易助手",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "OKX Web3 DEX 的 Boost 交易统计、自动交易与侧边栏控制台。",
   "minimum_chrome_version": "114",
   "permissions": [
     "activeTab",
     "sidePanel",
+    "scripting",
     "tabs"
   ],
   "host_permissions": [

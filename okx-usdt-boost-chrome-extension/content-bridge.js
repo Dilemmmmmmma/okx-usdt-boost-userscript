@@ -1,6 +1,9 @@
 (() => {
   'use strict';
 
+  if (window.__OKX_USDT_BOOST_CHROME_BRIDGE__) return;
+  window.__OKX_USDT_BOOST_CHROME_BRIDGE__ = true;
+
   const CHANNEL_KEY = '__okxBoostExtension';
   const pendingCommands = new Map();
   let commandSequence = 0;

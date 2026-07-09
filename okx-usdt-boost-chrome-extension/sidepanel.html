@@ -55,12 +55,12 @@
       <section class="section settings-section">
         <div class="section-heading"><span>设置</span><span id="automation-hint" class="source-label">--</span></div>
         <div class="form-grid">
-          <label>返佣比例(%)<input id="rebate-percent" type="number" min="0" step="0.01"></label>
-          <label>固定比例(%)<input id="fixed-percent" type="number" disabled></label>
-          <label>日均交易量<input id="boost-daily" type="number" min="1" step="0.01"></label>
-          <label>Boost 倍数<input id="boost-multiplier" type="number" min="0" step="0.01"></label>
-          <label>买入序号<input id="buy-option-index" type="number" min="1" step="1"></label>
-          <label>定时启动(分钟)<input id="schedule-minutes" type="number" min="1" step="1"></label>
+          <label>返佣比例(%)<input id="rebate-percent" type="number" min="0" step="0.01" value="48"></label>
+          <label>固定比例(%)<input id="fixed-percent" type="number" value="20" disabled></label>
+          <label>日均交易量<input id="boost-daily" type="number" min="1" step="0.01" value="500"></label>
+          <label>Boost 倍数<input id="boost-multiplier" type="number" min="0" step="0.01" value="0.12"></label>
+          <label>买入序号<input id="buy-option-index" type="number" min="1" step="1" value="3"></label>
+          <label>定时启动(分钟)<input id="schedule-minutes" type="number" min="1" step="1" value="10"></label>
         </div>
         <div class="settings-actions">
           <button id="save-settings-button" class="secondary-button" type="button">保存设置</button>

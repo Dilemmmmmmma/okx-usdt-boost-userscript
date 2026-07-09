@@ -935,6 +935,11 @@
         startExtensionStateBridge();
     }
 
+    function hasVisibleLegacyUserscriptPanel() {
+        return Array.from(document.querySelectorAll('#okx-usdt-calculator'))
+            .some((panel) => panel !== calculatorPanelEl && isVisible(panel));
+    }
+
     function loadBoostSettings() {
         const dailyInput = document.getElementById('boost-daily');
         const multiInput = document.getElementById('boost-multi');
@@ -2445,6 +2450,11 @@
             return false;
         }
 
+        if (hasVisibleLegacyUserscriptPanel()) {
+            updateAutoTradeStatus('检测到旧篡改猴脚本，请先停用后再启动扩展自动交易', '#ff5252');
+            return false;
+        }
+
         const target = getBoostTarget();
         if (!Number.isFinite(target)) {
             updateAutoTradeStatus('实际需刷量无效，无法启动', '#ff5252');
@@ -3644,8 +3654,9 @@
         const boostStatus = document.getElementById('boost-auto-status');
 
         return {
-            version: '1.0.0',
+            version: '1.0.1',
             ready: Boolean(calculatorPanelEl),
+            legacyUserscriptDetected: hasVisibleLegacyUserscriptPanel(),
             url: window.location.href,
             token: getCurrentTokenFromUrl(),
             auto: {
