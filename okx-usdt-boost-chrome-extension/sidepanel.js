@@ -79,7 +79,7 @@
   function setBoostControlsReady(ready) {
     setDisabled([
       'auto-trade-button', 'refresh-button', 'schedule-button',
-      'alarm-toggle', 'pause-stats-toggle', 'rebate-percent', 'boost-daily',
+      'alarm-toggle', 'rebate-percent', 'boost-daily',
       'boost-multiplier', 'buy-option-index', 'schedule-minutes'
     ], !ready);
   }
@@ -196,7 +196,6 @@
     currentBoostState = state;
     const stats = state.stats || {};
     const fee = stats.feeBreakdown || {};
-    const paused = Boolean(state.controls?.tradeStatsPaused);
     const dailyTarget = Number(state.targets?.dailyTarget) || 0;
     const boost = state.boost || {};
     const legacy = Boolean(state.legacyUserscriptDetected);
@@ -210,14 +209,14 @@
       setBoostControlsReady(ready);
     }
 
-    $('summary-source').textContent = paused ? '统计停止' : stats.sellSyncPending ? '卖出同步中' : stats.boostProgressOfficial ? 'Boost实时' : `08:00订单 ${stats.count || 0}`;
-    setMetric('order-history-total', paused ? '--' : formatNumber(stats.orderHistoryTotal));
-    setMetric('boost-total', paused ? '--' : formatNumber(stats.officialBoostTotal));
-    setMetric('estimated-fee', paused ? '--' : formatSigned(fee.estimatedFee), paused ? 'pending' : 'negative');
-    setMetric('actual-rebate', paused ? '--' : formatNumber(fee.actualRebate, 2), Number(fee.actualRebate) > 0 ? 'positive' : '');
-    setMetric('net-difference', paused ? '--' : stats.sellSyncPending ? '同步中' : formatSigned(stats.net), paused || stats.sellSyncPending ? 'pending' : toneForValue(stats.net));
-    setMetric('rebate-adjusted-wear', paused ? '--' : stats.sellSyncPending ? '同步中' : formatSigned(fee.rebateAdjustedWear), paused || stats.sellSyncPending ? 'pending' : toneForValue(fee.rebateAdjustedWear));
-    setMetric('boost-progress', paused ? '已停止' : dailyTarget > 0 ? `${formatNumber(stats.boostProgress, 2)} / ${formatNumber(dailyTarget, 2)}` : formatNumber(stats.boostProgress, 2), !paused && dailyTarget > 0 && Number(stats.boostProgress) >= dailyTarget ? 'positive' : '');
+    $('summary-source').textContent = stats.sellSyncPending ? '卖出同步中' : stats.boostProgressOfficial ? 'Boost实时' : `08:00订单 ${stats.count || 0}`;
+    setMetric('order-history-total', formatNumber(stats.orderHistoryTotal));
+    setMetric('boost-total', formatNumber(stats.officialBoostTotal));
+    setMetric('estimated-fee', formatSigned(fee.estimatedFee), 'negative');
+    setMetric('actual-rebate', formatNumber(fee.actualRebate, 2), Number(fee.actualRebate) > 0 ? 'positive' : '');
+    setMetric('net-difference', stats.sellSyncPending ? '同步中' : formatSigned(stats.net), stats.sellSyncPending ? 'pending' : toneForValue(stats.net));
+    setMetric('rebate-adjusted-wear', stats.sellSyncPending ? '同步中' : formatSigned(fee.rebateAdjustedWear), stats.sellSyncPending ? 'pending' : toneForValue(fee.rebateAdjustedWear));
+    setMetric('boost-progress', dailyTarget > 0 ? `${formatNumber(stats.boostProgress, 2)} / ${formatNumber(dailyTarget, 2)}` : formatNumber(stats.boostProgress, 2), dailyTarget > 0 && Number(stats.boostProgress) >= dailyTarget ? 'positive' : '');
 
     $('auto-trade-button').textContent = state.auto?.running ? '停止 Boost 交易' : '启动 Boost 交易';
     $('auto-trade-button').classList.toggle('running', Boolean(state.auto?.running));
@@ -237,7 +236,6 @@
       loadedBoostForm = true;
     }
     $('alarm-toggle').checked = Boolean(state.controls?.alarmEnabled);
-    $('pause-stats-toggle').checked = paused;
     $('automation-hint').textContent = state.controls?.boostAutomationStatus || '--';
     const scheduled = Number(state.auto?.scheduledRemainingMs) > 0;
     $('schedule-button').textContent = scheduled ? '取消定时' : '开始倒计时';
@@ -374,7 +372,6 @@
       sendBoost(scheduled ? 'cancel-schedule' : 'schedule-auto-trade', scheduled ? {} : { minutes: $('schedule-minutes').value });
     });
     $('alarm-toggle').addEventListener('change', (event) => sendBoost('set-alarm', { enabled: event.target.checked }));
-    $('pause-stats-toggle').addEventListener('change', (event) => sendBoost('set-trade-stats-paused', { enabled: event.target.checked }));
     $('open-records-button').addEventListener('click', () => {
       chrome.runtime.sendMessage({ type: 'OKX_BOOST_OPEN_RECORDS' }).catch((error) => setFooter(friendlyError(error), true));
     });

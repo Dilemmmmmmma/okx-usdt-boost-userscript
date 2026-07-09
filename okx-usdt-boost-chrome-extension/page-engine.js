@@ -879,13 +879,6 @@
                         <span id="alarm-toggle-text">开启达量警报</span>
                     </label>
                 </div>
-                <div class="okx-calc-row">
-                    <span class="okx-calc-muted">停止交易统计</span>
-                    <label id="trade-stats-toggle-label" class="okx-calc-alarm" title="开启后不拉取订单历史、不计算USDT交易统计，自动交易持续买卖">
-                        <input type="checkbox" id="pause-trade-stats">
-                        <span id="trade-stats-toggle-text">交易统计运行中</span>
-                    </label>
-                </div>
             </div>
         `;
 
@@ -898,10 +891,6 @@
             updateAlarmToggleState();
             if (isAlarmEnabled) playAlertSound();
         });
-        document.getElementById('pause-trade-stats').addEventListener('change', (e) => {
-            setTradeStatsPaused(e.target.checked);
-        });
-
         document.getElementById('btn-auto-trade').addEventListener('click', toggleAutoTrade);
         document.getElementById('btn-schedule-auto-trade').addEventListener('click', toggleScheduledAutoTrade);
         document.getElementById('boost-daily').addEventListener('input', calculateBoost);
@@ -917,7 +906,7 @@
 
         loadBoostSettings();
         loadRebateSettings();
-        loadTradeStatsPausedSetting();
+        clearLegacyTradeStatsPauseSetting();
         loadBoostRecordsCache();
         renderBoostRecords();
         refreshBoostRecordsFromCache();
@@ -973,36 +962,9 @@
         window.localStorage.setItem(LS_KEY_REBATE_PERCENT, String(rebateInput.value));
     }
 
-    function loadTradeStatsPausedSetting() {
-        isTradeStatsPaused = window.localStorage.getItem(LS_KEY_TRADE_STATS_PAUSED) === '1';
-
-        const checkbox = document.getElementById('pause-trade-stats');
-        if (checkbox) checkbox.checked = isTradeStatsPaused;
-        updateTradeStatsPausedToggleState();
-    }
-
-    function updateTradeStatsPausedToggleState() {
-        const label = document.getElementById('trade-stats-toggle-label');
-        const text = document.getElementById('trade-stats-toggle-text');
-
-        if (label) label.classList.toggle('is-enabled', isTradeStatsPaused);
-        if (text) text.textContent = isTradeStatsPaused ? '交易统计已停止' : '交易统计运行中';
-    }
-
-    function setTradeStatsPaused(paused) {
-        isTradeStatsPaused = Boolean(paused);
-        window.localStorage.setItem(LS_KEY_TRADE_STATS_PAUSED, isTradeStatsPaused ? '1' : '0');
-        updateTradeStatsPausedToggleState();
-
-        if (isTradeStatsPaused) {
-            clearSellOrderSyncBackgroundTimer();
-            pendingSellOrderSync = null;
-            updateAutoTradeStatus('交易统计已停止，跳过账单同步', '#ff9800');
-        } else {
-            updateAutoTradeStatus('交易统计已恢复', '#4caf50');
-        }
-
-        calculateStats();
+    function clearLegacyTradeStatsPauseSetting() {
+        isTradeStatsPaused = false;
+        window.localStorage.removeItem(LS_KEY_TRADE_STATS_PAUSED);
     }
 
     function updateBoostAutomationStatus(message, color = '#909090') {
@@ -3766,7 +3728,7 @@
                 if (isAlarmEnabled) playAlertSound();
                 return { ok: true, state: getExtensionState() };
             case 'set-trade-stats-paused':
-                setTradeStatsPaused(Boolean(payload.enabled));
+                clearLegacyTradeStatsPauseSetting();
                 return { ok: true, state: getExtensionState() };
             case 'schedule-auto-trade':
                 setExtensionInputValue('auto-trade-delay-minutes', payload.minutes, false);
