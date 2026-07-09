@@ -11,6 +11,8 @@
   let currentAlphaState = null;
   let loadedBoostForm = false;
   let loadedAlphaForm = false;
+  let boostAutosaveTimerId = null;
+  let alphaAutosaveTimerId = null;
 
   const $ = (id) => document.getElementById(id);
 
@@ -74,7 +76,7 @@
 
   function setBoostControlsReady(ready) {
     setDisabled([
-      'auto-trade-button', 'refresh-button', 'save-settings-button', 'schedule-button',
+      'auto-trade-button', 'refresh-button', 'schedule-button',
       'alarm-toggle', 'pause-stats-toggle', 'rebate-percent', 'boost-daily',
       'boost-multiplier', 'buy-option-index', 'schedule-minutes'
     ], !ready);
@@ -82,7 +84,7 @@
 
   function setAlphaControlsReady(ready) {
     setDisabled([
-      'alpha-run-button', 'alpha-clear-button', 'alpha-save-settings', 'alpha-target',
+      'alpha-run-button', 'alpha-clear-button', 'alpha-target',
       'refresh-button',
       'alpha-sell-slider', 'alpha-buy-min', 'alpha-buy-max', 'alpha-cycle-min',
       'alpha-cycle-max', 'alpha-buy-wait', 'alpha-sell-wait', 'alpha-stable-toggle',
@@ -141,6 +143,27 @@
       reverseOrderEnabled: $('alpha-reverse-toggle').checked,
       volatilityLimitEnabled: $('alpha-volatility-toggle').checked
     };
+  }
+
+  function saveBoostSettings(quiet = true) {
+    return sendBoost('save-settings', getBoostPayload(), quiet);
+  }
+
+  function saveAlphaSettings(quiet = true) {
+    return sendAlpha('alpha-save-settings', getAlphaPayload(), quiet);
+  }
+
+  function scheduleBoostAutosave() {
+    window.clearTimeout(boostAutosaveTimerId);
+    boostAutosaveTimerId = window.setTimeout(() => saveBoostSettings(true), 250);
+  }
+
+  function scheduleAlphaAutosave() {
+    window.clearTimeout(alphaAutosaveTimerId);
+    alphaAutosaveTimerId = window.setTimeout(async () => {
+      const result = await saveAlphaSettings(true);
+      if (result) $('alpha-settings-status').textContent = '参数与开关已实时生效';
+    }, 250);
   }
 
   function renderBoostState(state) {
@@ -224,7 +247,7 @@
     setMetric('alpha-wear', stats.wear === null ? '--' : formatSigned(stats.wear), toneForValue(stats.wear));
     $('alpha-run-button').textContent = state.running ? '停止 Alpha 交易' : '启动 Alpha 交易';
     $('alpha-run-button').classList.toggle('running', Boolean(state.running));
-    $('alpha-run-status').textContent = legacy ? '请先停用旧 Alpha 篡改猴脚本' : state.running ? '自动交易运行中' : '未启动';
+    $('alpha-run-status').textContent = legacy ? '请先停用旧 Alpha 篡改猴脚本' : state.status || (state.running ? '自动交易运行中' : '未启动');
 
     if (state.ready && !loadedAlphaForm) {
       setInputValue('alpha-target', settings.target, true);
@@ -303,7 +326,6 @@
     $('workspace-switch').addEventListener('click', switchWorkspace);
     $('refresh-button').addEventListener('click', () => activePageKind === 'alpha' ? sendAlpha('alpha-refresh') : sendBoost('refresh'));
     $('auto-trade-button').addEventListener('click', () => sendBoost('toggle-auto-trade'));
-    $('save-settings-button').addEventListener('click', () => sendBoost('save-settings', getBoostPayload()));
     $('schedule-button').addEventListener('click', () => {
       const scheduled = Number(currentBoostState?.auto?.scheduledRemainingMs) > 0;
       sendBoost(scheduled ? 'cancel-schedule' : 'schedule-auto-trade', scheduled ? {} : { minutes: $('schedule-minutes').value });
@@ -313,13 +335,23 @@
     $('open-records-button').addEventListener('click', () => chrome.runtime.sendMessage({ type: 'OKX_BOOST_OPEN_RECORDS' }));
     $('alpha-run-button').addEventListener('click', async () => {
       if (!currentAlphaState?.running) {
-        const saved = await sendAlpha('alpha-save-settings', getAlphaPayload());
+        const saved = await saveAlphaSettings();
         if (!saved) return;
       }
       sendAlpha('alpha-toggle-run');
     });
     $('alpha-clear-button').addEventListener('click', () => sendAlpha('alpha-clear-records'));
-    $('alpha-save-settings').addEventListener('click', () => sendAlpha('alpha-save-settings', getAlphaPayload()));
+    ['rebate-percent', 'boost-daily', 'boost-multiplier', 'buy-option-index'].forEach((id) => {
+      $(id).addEventListener('input', scheduleBoostAutosave);
+      $(id).addEventListener('change', scheduleBoostAutosave);
+    });
+    ['alpha-target', 'alpha-sell-slider', 'alpha-buy-min', 'alpha-buy-max', 'alpha-cycle-min', 'alpha-cycle-max', 'alpha-buy-wait', 'alpha-sell-wait'].forEach((id) => {
+      $(id).addEventListener('input', scheduleAlphaAutosave);
+      $(id).addEventListener('change', scheduleAlphaAutosave);
+    });
+    ['alpha-stable-toggle', 'alpha-order-monitor-toggle', 'alpha-reverse-toggle', 'alpha-volatility-toggle'].forEach((id) => {
+      $(id).addEventListener('change', scheduleAlphaAutosave);
+    });
   }
 
   chrome.runtime.onMessage.addListener((message, sender) => {

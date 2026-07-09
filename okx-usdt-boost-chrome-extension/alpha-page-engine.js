@@ -5046,10 +5046,11 @@ let stableMaxLagSec = STABLE_MAX_LAG_SEC_CONST;
 
   function alphaExtensionState() {
     return {
-      version: '1.1.1',
+      version: '1.1.2',
       ready: Boolean(inputAmount && btnStart),
       legacyUserscriptDetected: alphaHasVisibleLegacyPanel(),
       mfaAutomationDisabled: true,
+      status: alphaExtensionStatus,
       url: window.location.href,
       running,
       token: alphaExtensionText(currentTokenDisplay) || '--',
@@ -5116,6 +5117,8 @@ let stableMaxLagSec = STABLE_MAX_LAG_SEC_CONST;
     }
   }
 
+  let alphaExtensionStatus = 'Ready';
+
   async function handleAlphaExtensionCommand(command, payload = {}) {
     if (!inputAmount) return { ok: false, error: 'Alpha page engine is loading' };
     if (alphaHasVisibleLegacyPanel() && command === 'alpha-toggle-run') {
@@ -5126,7 +5129,18 @@ let stableMaxLagSec = STABLE_MAX_LAG_SEC_CONST;
       case 'alpha-get-state':
         return { ok: true, state: alphaExtensionState() };
       case 'alpha-toggle-run':
-        if (running) stop(); else start();
+        if (running) {
+          stop();
+          alphaExtensionStatus = 'Stopped';
+          return { ok: true, state: alphaExtensionState() };
+        }
+        if (!(parseFloat(inputAmount.value) > 0)) {
+          alphaExtensionStatus = 'Set a target amount greater than 0 before starting';
+          return { ok: true, state: alphaExtensionState() };
+        }
+        alphaExtensionStatus = 'Starting Alpha trade flow';
+        start();
+        alphaExtensionStatus = running ? 'Alpha auto trade running' : 'Alpha did not start. Check the target and trading panel.';
         return { ok: true, state: alphaExtensionState() };
       case 'alpha-save-settings':
         alphaSetInput(inputAmount, payload.target);
@@ -5142,6 +5156,7 @@ let stableMaxLagSec = STABLE_MAX_LAG_SEC_CONST;
         alphaSetCheckbox(reverseOrderCheckbox, payload.reverseOrderEnabled);
         alphaSetCheckbox(volatilityLimitCheckbox, payload.volatilityLimitEnabled);
         renewData();
+        alphaExtensionStatus = 'Settings applied';
         return { ok: true, state: alphaExtensionState() };
       case 'alpha-clear-records':
         LifecycleManager.clearRecords();

@@ -152,6 +152,7 @@ button, input { font: inherit; }
 .form-grid input:disabled { color: #777; background: #151515; }
 
 .settings-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
+.settings-actions.single-action { grid-template-columns: 1fr; }
 .secondary-button { min-height: 30px; border: 1px solid #454c56; background: #2b3139; color: #eaecef; }
 
 .toggle-list { display: grid; margin-top: 10px; border-top: 1px solid #222; }

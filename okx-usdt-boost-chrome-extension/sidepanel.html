@@ -67,8 +67,8 @@
           <label>买入序号<input id="buy-option-index" type="number" min="1" step="1" value="3"></label>
           <label>定时启动(分钟)<input id="schedule-minutes" type="number" min="1" step="1" value="10"></label>
         </div>
-        <div class="settings-actions">
-          <button id="save-settings-button" class="secondary-button" type="button">保存设置</button>
+        <div class="note">设置实时生效</div>
+        <div class="settings-actions single-action">
           <button id="schedule-button" class="secondary-button" type="button">开始倒计时</button>
         </div>
         <div id="schedule-status" class="status-line">定时启动未设置</div>
@@ -114,7 +114,7 @@
             <label class="toggle-row"><span>反向订单</span><input id="alpha-reverse-toggle" type="checkbox"><i></i></label>
             <label class="toggle-row"><span>波动限价</span><input id="alpha-volatility-toggle" type="checkbox"><i></i></label>
           </div>
-          <button id="alpha-save-settings" class="secondary-button alpha-save" type="button">保存 Alpha 设置</button>
+          <div id="alpha-settings-status" class="note">参数与开关实时生效</div>
           <div class="note alpha-security-note">身份验证器自动填充与外部 OTP 请求已禁用。</div>
         </section>
       </div>
