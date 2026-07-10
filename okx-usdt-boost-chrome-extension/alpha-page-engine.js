@@ -1,4 +1,4 @@
-﻿// ==UserScript==
+// ==UserScript==
 // @name         Alpha交易量工具
 // @namespace    http://tampermonkey.net/
 // @version      7.2.73
@@ -1603,42 +1603,8 @@
       localStorage.setItem('afterPairWaitEnabled', 'false');
       localStorage.setItem('afterPairWaitMinSec', String(afterPairWaitMinSec));
       localStorage.setItem('afterPairWaitMaxSec', String(afterPairWaitMaxSec));
-      limitPriceEnabled = false;
-      buyLimitPrice = '';
-      sellLimitPrice = '';
-      if (limitCheckbox) {
-        limitCheckbox.checked = false;
-        limitCheckbox.dispatchEvent(new Event('change', { bubbles: true }));
-      }
-      if (buyLimitInput) {
-        buyLimitInput.value = '';
-        buyLimitInput.dispatchEvent(new Event('input', { bubbles: true }));
-      }
-      if (sellLimitInput) {
-        sellLimitInput.value = '';
-        sellLimitInput.dispatchEvent(new Event('input', { bubbles: true }));
-      }
-      localStorage.setItem('limitPriceEnabled', 'false');
-      localStorage.setItem('buyLimitPrice', '');
-      localStorage.setItem('sellLimitPrice', '');
-      volatilityRangeMin = RANGE_MIN;
-      volatilityRangeMax = RANGE_MAX;
-      if (volatilityLimitCheckbox) {
-        volatilityLimitCheckbox.checked = true;
-        volatilityLimitCheckbox.dispatchEvent(new Event('change', { bubbles: true }));
-      }
-      if (volatilityRangeMinInput) {
-        volatilityRangeMinInput.value = String(volatilityRangeMin);
-        volatilityRangeMinInput.dispatchEvent(new Event('input', { bubbles: true }));
-      }
-      if (volatilityRangeMaxInput) {
-        volatilityRangeMaxInput.value = String(volatilityRangeMax);
-        volatilityRangeMaxInput.dispatchEvent(new Event('input', { bubbles: true }));
-      }
       volatilityLimitEnabled = true;
       localStorage.setItem('volatilityLimitEnabled', 'true');
-      localStorage.setItem('volatilityRangeMin', String(volatilityRangeMin));
-      localStorage.setItem('volatilityRangeMax', String(volatilityRangeMax));
       buySliderValue = 95;
       buySliderMin = 90;
       buySliderMax = 100;
@@ -1693,25 +1659,6 @@
       }
       localStorage.setItem('volatilityPauseEnabled', 'true');
       localStorage.setItem('volatilityPauseSec', String(volatilityPauseSec));
-      buyPricePremiumPct = DEFAULT_BUY_PRICE_PREMIUM_PCT;
-      sellPriceDiscountPct = DEFAULT_SELL_PRICE_DISCOUNT_PCT;
-      singleTradeMaxWearPct = DEFAULT_SINGLE_TRADE_MAX_WEAR_PCT;
-      if (buyPricePremiumInput) {
-        buyPricePremiumInput.value = String(buyPricePremiumPct);
-        buyPricePremiumInput.dispatchEvent(new Event('input', { bubbles: true }));
-      }
-      if (sellPriceDiscountInput) {
-        sellPriceDiscountInput.value = String(sellPriceDiscountPct);
-        sellPriceDiscountInput.dispatchEvent(new Event('input', { bubbles: true }));
-      }
-      if (singleTradeMaxWearInput) {
-        singleTradeMaxWearInput.value = String(singleTradeMaxWearPct);
-        singleTradeMaxWearInput.dispatchEvent(new Event('input', { bubbles: true }));
-      }
-      localStorage.setItem('buyPricePremiumPct', String(buyPricePremiumPct));
-      localStorage.setItem('sellPriceDiscountPct', String(sellPriceDiscountPct));
-      localStorage.setItem('singleTradeMaxWearPct', String(singleTradeMaxWearPct));
-
       // 重置点击间隔
       buyOrderWaitSec = DEFAULT_BUY_ORDER_WAIT_SEC;
       sellOrderWaitSec = DEFAULT_SELL_ORDER_WAIT_SEC;
@@ -1748,18 +1695,12 @@
   let inputAmount, btnStart, btnClear, totalAmountDisplay, buyAmountDisplay, integralDisplay, tokenRecordsContainer;
   let currentTokenDisplay;
   let cycleTimeMinInput, cycleTimeMaxInput;
-  let limitPriceEnabled = StorageLoader.bool('limitPriceEnabled', false);
   let volatilityLimitEnabled = StorageLoader.bool('volatilityLimitEnabled', true);
-  let buyLimitPrice = localStorage.getItem('buyLimitPrice') || '';
-  let sellLimitPrice = localStorage.getItem('sellLimitPrice') || '';
-  let buyLimitInput, sellLimitInput, limitCheckbox, limitBox, orderMonitorCheckbox, switchDelayCheckbox;
-  let buyPricePremiumInput, sellPriceDiscountInput, singleTradeMaxWearInput;
+  let orderMonitorCheckbox, switchDelayCheckbox;
   let buyOrderWaitInput, sellOrderWaitInput;
-  let volatilityLimitCheckbox;
   let volatilityRangeDisplay;
-  let volatilityRangeMin = StorageLoader.num('volatilityRangeMin', RANGE_MIN);
-  let volatilityRangeMax = StorageLoader.num('volatilityRangeMax', RANGE_MAX);
-  let volatilityRangeMinInput, volatilityRangeMaxInput;
+  const volatilityRangeMin = RANGE_MIN;
+  const volatilityRangeMax = RANGE_MAX;
   let quickAmount1 = StorageLoader.num('quickAmount1', 32800);
   let quickAmount2 = StorageLoader.num('quickAmount2', 65600);
   let quickAmount3 = StorageLoader.num('quickAmount3', 132000);
@@ -2053,13 +1994,9 @@
   let rememberPositionEnabled = StorageLoader.bool('rememberPositionEnabled', false);
   let rememberPositionCheckbox;
   let reverseOrderEnabled = StorageLoader.bool('reverseOrderEnabled', false);
-  let buyPriceAutoFollowEnabled = StorageLoader.bool('buyPriceAutoFollowEnabled', true);
-  let reverseSellAutoPriceEnabled = StorageLoader.bool('reverseSellAutoPriceEnabled', true);
   let reverseOrderInitialFillArmed = true;
   let reverseOrderInitialFillDone = false;
   let reverseOrderCheckbox;
-  let buyPriceAutoFollowCheckbox;
-  let reverseSellAutoPriceCheckbox;
   let authenticatorEnabled = false;
   let authenticatorSecret = '';
   let authenticatorCheckbox;
@@ -2069,8 +2006,8 @@
   let clickIntervalMinInput;
   let clickIntervalMaxInput;
   let stableDetectEnabled = StorageLoader.bool('stableDetectEnabled', true);
-  let stableWindowSec = StorageLoader.num('stableWindowSec', DEFAULT_STABLE_WINDOW_SEC);
-  let stableTolerancePct = StorageLoader.num('stableTolerancePct', DEFAULT_STABLE_TOLERANCE_PCT);
+  let stableWindowSec = DEFAULT_STABLE_WINDOW_SEC;
+  let stableTolerancePct = DEFAULT_STABLE_TOLERANCE_PCT;
   let stableMinSamples = STABLE_MIN_SAMPLES_CONST;
 let stableMinCoverageSec = STABLE_MIN_COVERAGE_SEC_CONST;
 let stableMaxLagSec = STABLE_MAX_LAG_SEC_CONST;
@@ -2176,9 +2113,9 @@ let stableMaxLagSec = STABLE_MAX_LAG_SEC_CONST;
   let completionAudioContext = null;
   let lastCompletionSoundAt = 0;
   let lastOrderStuckAlertAt = 0;
-  let buyPricePremiumPct = StorageLoader.num('buyPricePremiumPct', DEFAULT_BUY_PRICE_PREMIUM_PCT);
-  let sellPriceDiscountPct = StorageLoader.num('sellPriceDiscountPct', DEFAULT_SELL_PRICE_DISCOUNT_PCT);
-  let singleTradeMaxWearPct = StorageLoader.num('singleTradeMaxWearPct', DEFAULT_SINGLE_TRADE_MAX_WEAR_PCT);
+  const buyPricePremiumPct = DEFAULT_BUY_PRICE_PREMIUM_PCT;
+  const sellPriceDiscountPct = DEFAULT_SELL_PRICE_DISCOUNT_PCT;
+  const singleTradeMaxWearPct = DEFAULT_SINGLE_TRADE_MAX_WEAR_PCT;
   let buyOrderWaitSec = StorageLoader.num('buyOrderWaitSec', DEFAULT_BUY_ORDER_WAIT_SEC);
   let sellOrderWaitSec = StorageLoader.num('sellOrderWaitSec', DEFAULT_SELL_ORDER_WAIT_SEC);
   migrateOrderWaitDefaultSeconds();
@@ -2726,25 +2663,8 @@ let stableMaxLagSec = STABLE_MAX_LAG_SEC_CONST;
     async preClick() {
         const input = Array.from(document.querySelectorAll('input#limitPrice')).find(el => isNodeVisible(el)) || document.querySelector('input#limitPrice');
         if (input) {
-      if (currentTabIndex === 0 && !buyPriceAutoFollowEnabled) {
-        const fixedBuyPrice = String(input.value || '').trim();
-        const fixedBuyNumber = parsePriceNumber(fixedBuyPrice);
-        if (Number.isFinite(fixedBuyNumber) && fixedBuyNumber > 0) {
-          lastPlannedBuyPrice = fixedBuyNumber;
-          if (reverseOrderEnabled && reverseSellAutoPriceEnabled) {
-            try {
-              await syncReverseOrderPriceInput(fixedBuyPrice, { onlyIfEmpty: false, preferFallback: true });
-            } catch (_) {}
-          }
-        }
-        return;
-      }
       let desired = null;
-      if (limitPriceEnabled) {
-        if (currentTabIndex === 0 && buyLimitPrice) desired = String(buyLimitPrice);
-        if (currentTabIndex === 1 && sellLimitPrice) desired = String(sellLimitPrice);
-      }
-      if (!desired && volatilityLimitEnabled && !isNaN(lastRangePct)) {
+      if (volatilityLimitEnabled && !isNaN(lastRangePct)) {
         try {
             const alphaId = await DataManager.getCurrentAlphaId();
           if (alphaId) {
@@ -2765,7 +2685,7 @@ let stableMaxLagSec = STABLE_MAX_LAG_SEC_CONST;
       }
       if (desired) {
         if (currentTabIndex === 0) {
-          desired = buyPriceAutoFollowEnabled ? protectBuyPrice(desired) : formatPriceForInput(parsePriceNumber(desired), desired);
+          desired = protectBuyPrice(desired);
           if (!desired) return;
           lastPlannedBuyPrice = parsePriceNumber(desired);
         } else if (currentTabIndex === 1) {
@@ -2775,7 +2695,7 @@ let stableMaxLagSec = STABLE_MAX_LAG_SEC_CONST;
         try {
           simulateRealMouseClick(input);
           if (!setNativeInputValue(input, desired)) return;
-          if (currentTabIndex === 0 && reverseOrderEnabled && reverseSellAutoPriceEnabled) {
+          if (currentTabIndex === 0 && reverseOrderEnabled) {
             try {
               await syncReverseOrderPriceInput(desired, { onlyIfEmpty: false, preferFallback: true });
             } catch (_) {}
@@ -2786,7 +2706,6 @@ let stableMaxLagSec = STABLE_MAX_LAG_SEC_CONST;
         } catch (_) {}
       }
     }
-    if (currentTabIndex === 0 && !buyPriceAutoFollowEnabled) return;
     const path = '//*[@id="__APP"]/div[2]/div[7]/div/div[2]/div[3]/div[1]/div[1]/div[2]/div[2]';
     const elem = $xpath(path);
     if (elem) simulateRealMouseClick(elem);
@@ -3804,9 +3723,6 @@ let stableMaxLagSec = STABLE_MAX_LAG_SEC_CONST;
     afterPairWaitEnabled: 'afterPairWaitEnabled',
     afterPairWaitMinSec: 'afterPairWaitMinSec',
     afterPairWaitMaxSec: 'afterPairWaitMaxSec',
-    limitPriceEnabled: 'limitPriceEnabled',
-    buyLimitPrice: 'buyLimitPrice',
-    sellLimitPrice: 'sellLimitPrice',
     volatilityLimitEnabled: 'volatilityLimitEnabled',
     orderMonitorEnabled: 'orderMonitorEnabled',
     authenticatorEnabled: 'authenticatorEnabled',
@@ -3832,23 +3748,25 @@ let stableMaxLagSec = STABLE_MAX_LAG_SEC_CONST;
   STORAGE_KEYS.uptrendSlopeWindowSec = 'uptrendSlopeWindowSec';
   STORAGE_KEYS.uptrendMinSlopePctPerSec = 'uptrendMinSlopePctPerSec';
   STORAGE_KEYS.uptrendMinSecondDerivPctPerSec2 = 'uptrendMinSecondDerivPctPerSec2';
-  STORAGE_KEYS.buyPricePremiumPct = 'buyPricePremiumPct';
-  STORAGE_KEYS.sellPriceDiscountPct = 'sellPriceDiscountPct';
-  STORAGE_KEYS.singleTradeMaxWearPct = 'singleTradeMaxWearPct';
+
+  function clearLegacyHiddenPriceSettings() {
+    const legacyKeys = [
+      'limitPriceEnabled', 'buyLimitPrice', 'sellLimitPrice',
+      'buyPricePremiumPct', 'sellPriceDiscountPct', 'singleTradeMaxWearPct',
+      'buyPriceAutoFollowEnabled', 'reverseSellAutoPriceEnabled',
+      'volatilityRangeMin', 'volatilityRangeMax', 'stableWindowSec', 'stableTolerancePct'
+    ];
+    for (const key of legacyKeys) {
+      try { localStorage.removeItem(key); } catch (_) {}
+    }
+  }
   STORAGE_KEYS.buyOrderWaitSec = 'buyOrderWaitSec';
   STORAGE_KEYS.sellOrderWaitSec = 'sellOrderWaitSec';
-  STORAGE_KEYS.buyPriceAutoFollowEnabled = 'buyPriceAutoFollowEnabled';
-  STORAGE_KEYS.reverseSellAutoPriceEnabled = 'reverseSellAutoPriceEnabled';
   const UIBuilder = {
     sections: {
       run: {
         build(container) {
           return buildRunSection(container);
-        }
-      },
-      limit: {
-        build(container) {
-          return buildLimitSection(container);
         }
       },
       monitor: {
@@ -3939,40 +3857,6 @@ let stableMaxLagSec = STABLE_MAX_LAG_SEC_CONST;
     directionDisplay.textContent = '';
     rightGroup.appendChild(rangeDisplay);
     rightGroup.appendChild(directionDisplay);
-    const createTopSwitch = (text, checked, title, onChange) => {
-      const label = document.createElement('label');
-      label.style.display = 'inline-flex';
-      label.style.alignItems = 'center';
-      label.style.gap = '3px';
-      label.style.marginLeft = '6px';
-      label.style.fontSize = '12px';
-      label.style.color = '#ccc';
-      label.style.cursor = 'pointer';
-      label.style.whiteSpace = 'nowrap';
-      label.title = title || '';
-      const checkbox = document.createElement('input');
-      checkbox.type = 'checkbox';
-      checkbox.checked = !!checked;
-      checkbox.style.margin = '0';
-      const span = document.createElement('span');
-      span.textContent = text;
-      label.appendChild(checkbox);
-      label.appendChild(span);
-      checkbox.onchange = function () { onChange && onChange(!!this.checked); };
-      rightGroup.appendChild(label);
-      return checkbox;
-    };
-    buyPriceAutoFollowCheckbox = createTopSwitch('买单跟价', buyPriceAutoFollowEnabled, '开启后每轮买入前自动刷新买入价；关闭后不改买价框，固定使用你手动设置的买价', (checked) => {
-      buyPriceAutoFollowEnabled = checked;
-      localStorage.setItem(STORAGE_KEYS.buyPriceAutoFollowEnabled, String(buyPriceAutoFollowEnabled));
-    });
-    reverseSellAutoPriceCheckbox = createTopSwitch('卖单跟价', reverseSellAutoPriceEnabled, '运行中每轮买入前自动刷新反向订单卖价', (checked) => {
-      reverseSellAutoPriceEnabled = checked;
-      localStorage.setItem(STORAGE_KEYS.reverseSellAutoPriceEnabled, String(reverseSellAutoPriceEnabled));
-      if (reverseSellAutoPriceEnabled && reverseOrderEnabled) {
-        scheduleReverseOrderEnforce(5000, 350, { onlyIfEmpty: false, preferFallback: true });
-      }
-    });
     tokenRow.appendChild(rightGroup);
     container.appendChild(tokenRow);
     try { UIBuilder.buildSection('volume', container); } catch (_) {}
@@ -4345,270 +4229,6 @@ let stableMaxLagSec = STABLE_MAX_LAG_SEC_CONST;
     setButtonState(false);
     updateAmountDisplay();
   }
-  function buildLimitSection(container) {
-    const limitRow = document.createElement('div');
-    limitRow.style.marginTop = '10px';
-    limitRow.style.display = 'flex';
-    limitRow.style.alignItems = 'center';
-    limitRow.style.gap = '12px';
-    limitCheckbox = document.createElement('input');
-    limitCheckbox.type = 'checkbox';
-    limitCheckbox.id = 'limitPriceCheckbox';
-    limitCheckbox.checked = limitPriceEnabled;
-    const limitLabel = document.createElement('label');
-    limitLabel.textContent = '自行限价';
-    limitLabel.htmlFor = 'limitPriceCheckbox';
-    limitLabel.style.marginLeft = '4px';
-    const limitGroup = document.createElement('span');
-    limitGroup.appendChild(limitCheckbox);
-    limitGroup.appendChild(limitLabel);
-    volatilityLimitCheckbox = document.createElement('input');
-    volatilityLimitCheckbox.type = 'checkbox';
-    volatilityLimitCheckbox.id = 'volatilityLimitCheckbox';
-    volatilityLimitCheckbox.checked = volatilityLimitEnabled;
-    const volLimitLabel = document.createElement('label');
-    volLimitLabel.textContent = '波动限价';
-    volLimitLabel.htmlFor = 'volatilityLimitCheckbox';
-    volLimitLabel.style.marginLeft = '4px';
-    const volGroup = document.createElement('span');
-    volGroup.appendChild(volatilityLimitCheckbox);
-    volGroup.appendChild(volLimitLabel);
-    limitRow.appendChild(limitGroup);
-    limitRow.appendChild(volGroup);
-    container.appendChild(limitRow);
-    limitBox = document.createElement('div');
-    limitBox.style.display = 'none';
-    limitBox.style.marginTop = '8px';
-    const buyLimitLabel = document.createElement('span');
-    buyLimitLabel.textContent = '买入限价:';
-    buyLimitLabel.style.marginRight = '4px';
-    buyLimitInput = document.createElement('input');
-    buyLimitInput.type = 'number';
-    buyLimitInput.placeholder = '仅数字';
-    buyLimitInput.style.width = '90px';
-    buyLimitInput.style.marginRight = '10px';
-    buyLimitInput.style.borderRadius = '6px';
-    buyLimitInput.min = '0';
-    buyLimitInput.step = 'any';
-    buyLimitInput.value = buyLimitPrice;
-    buyLimitInput.oninput = function () { buyLimitPrice = this.value; localStorage.setItem(STORAGE_KEYS.buyLimitPrice, buyLimitPrice); };
-    const sellLimitLabel = document.createElement('span');
-    sellLimitLabel.textContent = '卖出限价:';
-    sellLimitLabel.style.marginRight = '4px';
-    sellLimitInput = document.createElement('input');
-    sellLimitInput.type = 'number';
-    sellLimitInput.placeholder = '仅数字';
-    sellLimitInput.style.width = '90px';
-    sellLimitInput.style.borderRadius = '6px';
-    sellLimitInput.min = '0';
-    sellLimitInput.step = 'any';
-    sellLimitInput.value = sellLimitPrice;
-    sellLimitInput.oninput = function () { sellLimitPrice = this.value; localStorage.setItem(STORAGE_KEYS.sellLimitPrice, sellLimitPrice); };
-    limitBox.appendChild(buyLimitLabel);
-    limitBox.appendChild(buyLimitInput);
-    limitBox.appendChild(sellLimitLabel);
-    limitBox.appendChild(sellLimitInput);
-    bindCheckboxToPanel({
-      checkbox: limitCheckbox,
-      panel: limitBox,
-      storageKey: STORAGE_KEYS.limitPriceEnabled,
-      defaultChecked: limitPriceEnabled,
-      onToggle: (checked) => {
-        limitPriceEnabled = checked;
-        if (reverseOrderCheckbox) {
-          const allowed = checked || volatilityLimitEnabled;
-          reverseOrderCheckbox.disabled = !allowed;
-          const lbl = document.querySelector('label[for="reverseOrderCheckbox"]');
-          if (lbl) lbl.style.opacity = reverseOrderCheckbox.disabled ? '0.5' : '1';
-          if (!allowed) {
-            reverseOrderEnabled = false;
-            reverseOrderCheckbox.checked = false;
-            try { localStorage.setItem('reverseOrderEnabled', 'false'); } catch (_) {}
-          }
-        }
-        if (checked) {
-          volatilityLimitCheckbox.checked = false;
-          volatilityLimitEnabled = false;
-          try { localStorage.setItem(STORAGE_KEYS.volatilityLimitEnabled, 'false'); } catch (_) {}
-          volatilityLimitCheckbox.disabled = true;
-        } else {
-          volatilityLimitCheckbox.disabled = false;
-        }
-      }
-    });
-    try {
-      if (limitCheckbox.checked && volatilityLimitCheckbox.checked) {
-        volatilityLimitCheckbox.checked = false;
-        volatilityLimitEnabled = false;
-        localStorage.setItem(STORAGE_KEYS.volatilityLimitEnabled, 'false');
-      }
-      if (volatilityLimitCheckbox.checked) {
-        limitCheckbox.disabled = true; if (buyLimitInput) buyLimitInput.disabled = true; if (sellLimitInput) sellLimitInput.disabled = true;
-      } else if (limitCheckbox.checked) {
-        volatilityLimitCheckbox.disabled = true;
-      }
-    } catch (_) {}
-    container.appendChild(limitBox);
-    const sellProtectBox = document.createElement('div');
-    sellProtectBox.style.marginTop = '8px';
-    sellProtectBox.style.display = 'flex';
-    sellProtectBox.style.alignItems = 'center';
-    sellProtectBox.style.gap = '6px';
-    sellProtectBox.style.flexWrap = 'wrap';
-    const buyPremiumLabel = document.createElement('span');
-    buyPremiumLabel.textContent = '买入加价%:';
-    buyPricePremiumInput = document.createElement('input');
-    buyPricePremiumInput.type = 'number';
-    buyPricePremiumInput.min = '0';
-    buyPricePremiumInput.max = '1';
-    buyPricePremiumInput.step = '0.01';
-    buyPricePremiumInput.value = String(buyPricePremiumPct);
-    buyPricePremiumInput.style.width = '58px';
-    buyPricePremiumInput.style.padding = '4px';
-    buyPricePremiumInput.style.borderRadius = '6px';
-    const sellDiscountLabel = document.createElement('span');
-    sellDiscountLabel.textContent = '卖出让价%:';
-    sellPriceDiscountInput = document.createElement('input');
-    sellPriceDiscountInput.type = 'number';
-    sellPriceDiscountInput.min = '0';
-    sellPriceDiscountInput.max = '1';
-    sellPriceDiscountInput.step = '0.01';
-    sellPriceDiscountInput.value = String(sellPriceDiscountPct);
-    sellPriceDiscountInput.style.width = '58px';
-    sellPriceDiscountInput.style.padding = '4px';
-    sellPriceDiscountInput.style.borderRadius = '6px';
-    const maxWearLabel = document.createElement('span');
-    maxWearLabel.textContent = '单轮最大磨损%:';
-    singleTradeMaxWearInput = document.createElement('input');
-    singleTradeMaxWearInput.type = 'number';
-    singleTradeMaxWearInput.min = '0';
-    singleTradeMaxWearInput.max = '5';
-    singleTradeMaxWearInput.step = '0.01';
-    singleTradeMaxWearInput.value = String(singleTradeMaxWearPct);
-    singleTradeMaxWearInput.style.width = '58px';
-    singleTradeMaxWearInput.style.padding = '4px';
-    singleTradeMaxWearInput.style.borderRadius = '6px';
-    buyPricePremiumInput.oninput = function () {
-      let v = parseFloat(this.value);
-      if (isNaN(v) || v < 0) v = 0;
-      if (v > 1) v = 1;
-      buyPricePremiumPct = v;
-      localStorage.setItem(STORAGE_KEYS.buyPricePremiumPct, String(v));
-    };
-    sellPriceDiscountInput.oninput = function () {
-      let v = parseFloat(this.value);
-      if (isNaN(v) || v < 0) v = 0;
-      if (v > 1) v = 1;
-      sellPriceDiscountPct = v;
-      localStorage.setItem(STORAGE_KEYS.sellPriceDiscountPct, String(v));
-    };
-    singleTradeMaxWearInput.oninput = function () {
-      let v = parseFloat(this.value);
-      if (isNaN(v) || v < 0) v = 0;
-      if (v > 5) v = 5;
-      singleTradeMaxWearPct = v;
-      localStorage.setItem(STORAGE_KEYS.singleTradeMaxWearPct, String(v));
-    };
-    sellProtectBox.appendChild(buyPremiumLabel);
-    sellProtectBox.appendChild(buyPricePremiumInput);
-    sellProtectBox.appendChild(sellDiscountLabel);
-    sellProtectBox.appendChild(sellPriceDiscountInput);
-    sellProtectBox.appendChild(maxWearLabel);
-    sellProtectBox.appendChild(singleTradeMaxWearInput);
-    container.appendChild(sellProtectBox);
-    const volatilityBox = document.createElement('div');
-    volatilityBox.style.display = 'none';
-    volatilityBox.style.marginTop = '8px';
-    const rangeMinInput = document.createElement('input');
-    rangeMinInput.type = 'number';
-    rangeMinInput.value = String(volatilityRangeMin);
-    rangeMinInput.min = '0.01';
-    rangeMinInput.max = '10';
-    rangeMinInput.step = '0.01';
-    rangeMinInput.style.width = '90px';
-    rangeMinInput.style.marginRight = '10px';
-    rangeMinInput.style.borderRadius = '6px';
-    rangeMinInput.style.padding = '6px';
-    volatilityRangeMinInput = rangeMinInput;
-    const rangeSeparator = document.createElement('span');
-    rangeSeparator.textContent = ' - ';
-    rangeSeparator.style.marginRight = '10px';
-    const rangeMaxInput = document.createElement('input');
-    rangeMaxInput.type = 'number';
-    rangeMaxInput.value = String(volatilityRangeMax);
-    rangeMaxInput.min = '0.01';
-    rangeMaxInput.max = '10';
-    rangeMaxInput.step = '0.01';
-    rangeMaxInput.style.width = '90px';
-    rangeMaxInput.style.borderRadius = '6px';
-    rangeMaxInput.style.padding = '6px';
-    volatilityRangeMaxInput = rangeMaxInput;
-    const rangeUnit = document.createElement('span');
-    rangeUnit.textContent = '%';
-    rangeUnit.style.marginLeft = '6px';
-    volatilityBox.appendChild(rangeMinInput);
-    volatilityBox.appendChild(rangeSeparator);
-    volatilityBox.appendChild(rangeMaxInput);
-    volatilityBox.appendChild(rangeUnit);
-    container.appendChild(volatilityBox);
-    rangeMinInput.oninput = function() {
-      let value = parseFloat(this.value);
-      if (isNaN(value) || value < 0.01) value = 0.01;
-      if (value > 10) value = 10;
-      volatilityRangeMin = value;
-      localStorage.setItem('volatilityRangeMin', String(volatilityRangeMin));
-      if (volatilityRangeMin >= volatilityRangeMax) {
-        volatilityRangeMax = volatilityRangeMin + 0.01;
-        rangeMaxInput.value = String(volatilityRangeMax);
-        localStorage.setItem('volatilityRangeMax', String(volatilityRangeMax));
-      }
-    };
-    rangeMaxInput.oninput = function() {
-      let value = parseFloat(this.value);
-      if (isNaN(value) || value < 0.01) value = 0.01;
-      if (value > 10) value = 10;
-      volatilityRangeMax = value;
-      localStorage.setItem('volatilityRangeMax', String(volatilityRangeMax));
-      if (volatilityRangeMax <= volatilityRangeMin) {
-        volatilityRangeMin = volatilityRangeMax - 0.01;
-        rangeMinInput.value = String(volatilityRangeMin);
-        localStorage.setItem('volatilityRangeMin', String(volatilityRangeMin));
-      }
-    };
-    bindCheckboxToPanel({
-      checkbox: volatilityLimitCheckbox,
-      panel: volatilityBox,
-      storageKey: STORAGE_KEYS.volatilityLimitEnabled,
-      defaultChecked: volatilityLimitEnabled,
-      onToggle: (checked) => {
-        volatilityLimitEnabled = checked;
-        if (reverseOrderCheckbox) {
-          const allowed = checked || limitPriceEnabled;
-          reverseOrderCheckbox.disabled = !allowed;
-          const lbl = document.querySelector('label[for="reverseOrderCheckbox"]');
-          if (lbl) lbl.style.opacity = reverseOrderCheckbox.disabled ? '0.5' : '1';
-          if (!allowed) {
-            reverseOrderEnabled = false;
-            reverseOrderCheckbox.checked = false;
-            try { localStorage.setItem('reverseOrderEnabled', 'false'); } catch (_) {}
-          }
-        }
-        if (checked) {
-          limitCheckbox.checked = false;
-          limitPriceEnabled = false;
-          try { localStorage.setItem(STORAGE_KEYS.limitPriceEnabled, 'false'); } catch (_) {}
-          if (limitBox) limitBox.style.display = 'none';
-          limitCheckbox.disabled = true;
-          if (buyLimitInput) buyLimitInput.disabled = true;
-          if (sellLimitInput) sellLimitInput.disabled = true;
-        } else {
-          limitCheckbox.disabled = false;
-          if (buyLimitInput) buyLimitInput.disabled = false;
-          if (sellLimitInput) sellLimitInput.disabled = false;
-        }
-      }
-    });
-  }
   function buildMonitorSection(container) {
     const cycleTimeContainer = document.createElement('div'); cycleTimeContainer.style.display = 'flex'; cycleTimeContainer.style.alignItems = 'center'; cycleTimeContainer.style.marginTop = '8px'; cycleTimeContainer.style.marginBottom = '8px';
     const cycleTimeLabel = document.createElement('span'); cycleTimeLabel.textContent = '随机循环时间'; cycleTimeLabel.style.marginRight = '4px';
@@ -4707,7 +4327,7 @@ let stableMaxLagSec = STABLE_MAX_LAG_SEC_CONST;
     const realtimeStatsLabel = document.createElement('label'); realtimeStatsLabel.textContent = '实时统计'; realtimeStatsLabel.htmlFor = 'realtimeStatsCheckbox'; realtimeStatsLabel.style.marginLeft = '4px';
     const realtimeStatsGroup = document.createElement('span'); realtimeStatsGroup.appendChild(realtimeStatsCheckbox); realtimeStatsGroup.appendChild(realtimeStatsLabel);
     realtimeStatsGroup.style.display = 'none';
-    reverseOrderCheckbox = document.createElement('input'); reverseOrderCheckbox.type = 'checkbox'; reverseOrderCheckbox.id = 'reverseOrderCheckbox'; reverseOrderCheckbox.checked = reverseOrderEnabled; reverseOrderCheckbox.disabled = !(limitPriceEnabled || volatilityLimitEnabled);
+    reverseOrderCheckbox = document.createElement('input'); reverseOrderCheckbox.type = 'checkbox'; reverseOrderCheckbox.id = 'reverseOrderCheckbox'; reverseOrderCheckbox.checked = reverseOrderEnabled; reverseOrderCheckbox.disabled = !volatilityLimitEnabled;
     const reverseOrderLabel = document.createElement('label'); reverseOrderLabel.textContent = '反向订单'; reverseOrderLabel.htmlFor = 'reverseOrderCheckbox'; reverseOrderLabel.style.marginLeft = '4px'; reverseOrderLabel.style.opacity = reverseOrderCheckbox.disabled ? '0.5' : '1';
     const reverseOrderGroup = document.createElement('span'); reverseOrderGroup.appendChild(reverseOrderCheckbox); reverseOrderGroup.appendChild(reverseOrderLabel);
     try {
@@ -4938,6 +4558,7 @@ let stableMaxLagSec = STABLE_MAX_LAG_SEC_CONST;
   }
   function createUI() {
     try {
+      clearLegacyHiddenPriceSettings();
       ResourceManager.cleanupType('uiEvent');
       ResourceManager.cleanupType('uiTimeout');
       ResourceManager.cleanupType('uiTimer');
@@ -5003,7 +4624,6 @@ let stableMaxLagSec = STABLE_MAX_LAG_SEC_CONST;
     }
     const prevSlider = document.getElementById('alpha-slider-container');
     if (prevSlider) { prevSlider.style.display = collapsed ? 'none' : 'flex'; settingsWrapper.appendChild(prevSlider); }
-    UIBuilder.buildSection('limit', settingsWrapper);
     UIBuilder.buildSection('monitor', settingsWrapper);
     try { Scheduler.start(); MonitorRegistry.start('token'); } catch (e) { }
     try { setManagedTimeout('uiTimeout', RESOURCE_IDS.uiInitialRefresh, () => { UIUpdater.updateDailyVolumeUI(); scheduleDailyRefresh(); }, 500); } catch (_) {}
@@ -5046,7 +4666,7 @@ let stableMaxLagSec = STABLE_MAX_LAG_SEC_CONST;
 
   function alphaExtensionState() {
     return {
-      version: '1.1.3',
+      version: '1.1.7',
       ready: Boolean(inputAmount && btnStart),
       legacyUserscriptDetected: alphaHasVisibleLegacyPanel(),
       status: alphaExtensionStatus,
@@ -5086,8 +4706,7 @@ let stableMaxLagSec = STABLE_MAX_LAG_SEC_CONST;
         stableDetectEnabled,
         orderMonitorEnabled: Boolean(orderMonitorCheckbox ? orderMonitorCheckbox.checked : orderMonitorPersisted),
         reverseOrderEnabled,
-        volatilityLimitEnabled,
-        limitPriceEnabled
+        volatilityLimitEnabled
       }
     };
   }
@@ -5152,8 +4771,12 @@ let stableMaxLagSec = STABLE_MAX_LAG_SEC_CONST;
         alphaSetInput(sellOrderWaitInput, payload.sellOrderWaitSec);
         alphaSetCheckbox(stableCheckbox, payload.stableDetectEnabled);
         alphaSetCheckbox(orderMonitorCheckbox, payload.orderMonitorEnabled);
-        alphaSetCheckbox(reverseOrderCheckbox, payload.reverseOrderEnabled);
-        alphaSetCheckbox(volatilityLimitCheckbox, payload.volatilityLimitEnabled);
+        if (payload.volatilityLimitEnabled !== undefined && payload.volatilityLimitEnabled !== null) {
+          volatilityLimitEnabled = Boolean(payload.volatilityLimitEnabled);
+          localStorage.setItem(STORAGE_KEYS.volatilityLimitEnabled, String(volatilityLimitEnabled));
+          if (reverseOrderCheckbox) reverseOrderCheckbox.disabled = !volatilityLimitEnabled;
+        }
+        alphaSetCheckbox(reverseOrderCheckbox, volatilityLimitEnabled && Boolean(payload.reverseOrderEnabled));
         renewData();
         alphaExtensionStatus = '设置已生效';
         return { ok: true, state: alphaExtensionState() };
@@ -5408,11 +5031,6 @@ let stableMaxLagSec = STABLE_MAX_LAG_SEC_CONST;
     if (options.preferFallback && fallbackPrice) {
       return protectSellPrice(fallbackPrice, { applyDiscount: true, buyReferencePrice: fallbackPrice });
     }
-    if (limitPriceEnabled) {
-      if (sellLimitPrice) return protectSellPrice(sellLimitPrice, { applyDiscount: true, buyReferencePrice: buyLimitPrice || fallbackPrice });
-      if (buyLimitPrice) return protectSellPrice(buyLimitPrice, { applyDiscount: true, buyReferencePrice: buyLimitPrice });
-      if (fallbackPrice) return protectSellPrice(fallbackPrice, { applyDiscount: true, buyReferencePrice: fallbackPrice });
-    }
     const visiblePrice = getVisibleLimitPriceValue();
     if (visiblePrice) return protectSellPrice(visiblePrice, { applyDiscount: true, buyReferencePrice: fallbackPrice || visiblePrice });
     if (fallbackPrice) return protectSellPrice(fallbackPrice, { applyDiscount: true, buyReferencePrice: fallbackPrice });
@@ -5460,7 +5078,6 @@ let stableMaxLagSec = STABLE_MAX_LAG_SEC_CONST;
     const values = [
       lastBuyReferencePrice,
       lastPlannedBuyPrice,
-      parsePriceNumber(buyLimitPrice),
       parsePriceNumber(fallbackPrice),
       parsePriceNumber(getVisibleLimitPriceValue())
     ];
