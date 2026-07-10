@@ -71,6 +71,7 @@
     const LS_KEY_DAILY_STATS = 'okx_usdt_daily_order_stats';
     const LS_KEY_BOOST_ACCOUNT_ID = 'okx_usdt_boost_account_id';
     const LS_KEY_BOOST_RECORDS = 'okx_usdt_boost_records';
+    const LS_KEY_BOOST_RECORDS_BY_ACCOUNT = 'okx_usdt_boost_records_by_account';
     const LS_KEY_AUTO_TRADE_RESUME = 'okx_usdt_auto_trade_resume';
     const LS_KEY_TRADE_STATS_PAUSED = 'okx_usdt_trade_stats_paused';
     const LS_KEY_AUTO_TRADE_SCHEDULE_END_AT = 'okx_usdt_auto_trade_schedule_end_at';
@@ -1091,52 +1092,101 @@
         }
     }
 
-    function cacheBoostAccountId(accountId) {
-        const normalizedAccountId = String(accountId || '').trim();
-        if (!normalizedAccountId) return '';
+    function normalizeBoostAccountId(accountId) {
+        return String(accountId || '').trim();
+    }
+
+    function isBoostRecordsPage() {
+        return /\/boost\/records\/?$/.test(String(window.location.pathname || ''));
+    }
+
+    function loadBoostRecordsByAccount() {
+        try {
+            const raw = window.localStorage.getItem(LS_KEY_BOOST_RECORDS_BY_ACCOUNT);
+            const recordsByAccount = raw ? JSON.parse(raw) : null;
+            return recordsByAccount && typeof recordsByAccount === 'object' && !Array.isArray(recordsByAccount)
+                ? recordsByAccount
+                : {};
+        } catch (err) {
+            console.error('[USDT计算器] 读取 Boost records 账户缓存失败', err);
+            return {};
+        }
+    }
+
+    function getCachedBoostRecords(accountId) {
+        const normalizedAccountId = normalizeBoostAccountId(accountId);
+        if (!normalizedAccountId) return null;
+
+        const recordsByAccount = loadBoostRecordsByAccount();
+        const accountCache = recordsByAccount[normalizedAccountId];
+        if (accountCache && accountCache.accountId === normalizedAccountId && accountCache.data) {
+            return accountCache;
+        }
+
+        try {
+            const raw = window.localStorage.getItem(LS_KEY_BOOST_RECORDS);
+            const legacyCache = raw ? JSON.parse(raw) : null;
+            return legacyCache && legacyCache.accountId === normalizedAccountId && legacyCache.data
+                ? legacyCache
+                : null;
+        } catch (err) {
+            console.error('[USDT计算器] 读取 Boost records 缓存失败', err);
+            return null;
+        }
+    }
+
+    function cacheBoostAccountId(accountId, { allowAccountSwitch = false } = {}) {
+        const normalizedAccountId = normalizeBoostAccountId(accountId);
+        if (!normalizedAccountId) return lastBoostAccountId;
+
+        // A token page can request records for a non-selected context. Only the
+        // dedicated Boost records page is allowed to establish or replace binding.
+        if (!lastBoostAccountId && !allowAccountSwitch) {
+            console.debug('[USDT计算器] 等待 Boost 记录页确认 accountId', normalizedAccountId);
+            return '';
+        }
+
+        if (lastBoostAccountId && normalizedAccountId !== lastBoostAccountId && !allowAccountSwitch) {
+            console.debug('[USDT计算器] 已忽略非 Boost 记录页的 accountId 变更', normalizedAccountId);
+            return lastBoostAccountId;
+        }
 
         if (normalizedAccountId !== lastBoostAccountId) {
             lastBoostAccountId = normalizedAccountId;
             try {
                 window.localStorage.setItem(LS_KEY_BOOST_ACCOUNT_ID, normalizedAccountId);
-
-                if (lastBoostRecords && lastBoostRecords.accountId !== normalizedAccountId) {
-                    lastBoostRecords = null;
-                    window.localStorage.removeItem(LS_KEY_BOOST_RECORDS);
-                    renderBoostRecords();
-                }
             } catch (err) {
                 console.error('[USDT计算器] 保存 Boost accountId 缓存失败', err);
             }
+
+            lastBoostRecords = getCachedBoostRecords(normalizedAccountId);
+            renderBoostRecords();
         }
 
         return normalizedAccountId;
     }
 
     function loadBoostRecordsCache() {
-        lastBoostAccountId = String(window.localStorage.getItem(LS_KEY_BOOST_ACCOUNT_ID) || '').trim();
-
-        try {
-            const raw = window.localStorage.getItem(LS_KEY_BOOST_RECORDS);
-            const cached = raw ? JSON.parse(raw) : null;
-            lastBoostRecords = cached && cached.accountId === lastBoostAccountId && cached.data
-                ? cached
-                : null;
-        } catch (err) {
-            lastBoostRecords = null;
-            console.error('[USDT计算器] 读取 Boost records 缓存失败', err);
-        }
+        lastBoostAccountId = normalizeBoostAccountId(window.localStorage.getItem(LS_KEY_BOOST_ACCOUNT_ID));
+        lastBoostRecords = getCachedBoostRecords(lastBoostAccountId);
     }
 
     function saveBoostRecordsCache(accountId, data) {
+        const normalizedAccountId = normalizeBoostAccountId(accountId);
+        if (!normalizedAccountId || !data) return;
+
         lastBoostRecords = {
-            accountId,
+            accountId: normalizedAccountId,
             data,
             updatedAt: Date.now()
         };
 
         try {
             window.localStorage.setItem(LS_KEY_BOOST_RECORDS, JSON.stringify(lastBoostRecords));
+
+            const recordsByAccount = loadBoostRecordsByAccount();
+            recordsByAccount[normalizedAccountId] = lastBoostRecords;
+            window.localStorage.setItem(LS_KEY_BOOST_RECORDS_BY_ACCOUNT, JSON.stringify(recordsByAccount));
         } catch (err) {
             console.error('[USDT计算器] 保存 Boost records 缓存失败', err);
         }
@@ -1278,9 +1328,16 @@
             : '下次断档：暂无待衔接交易量';
     }
 
-    function handleBoostRecordsResponse(payload, accountId) {
-        const normalizedAccountId = cacheBoostAccountId(accountId);
+    function handleBoostRecordsResponse(payload, accountId, { allowAccountSwitch = false } = {}) {
+        const normalizedAccountId = normalizeBoostAccountId(accountId);
         if (!normalizedAccountId || !payload || payload.code !== 0 || !payload.data) return;
+
+        const selectedAccountId = cacheBoostAccountId(normalizedAccountId, { allowAccountSwitch });
+        if (selectedAccountId !== normalizedAccountId) {
+            console.debug('[USDT计算器] 已忽略非当前账户的 Boost records 响应', normalizedAccountId);
+            return;
+        }
+
         saveBoostRecordsCache(normalizedAccountId, payload.data);
         renderBoostRecords();
         calculateStats();
@@ -3423,9 +3480,10 @@
         }
 
         if (boostAccountId) {
-            cacheBoostAccountId(boostAccountId);
             response.clone().json()
-                .then((payload) => handleBoostRecordsResponse(payload, boostAccountId))
+                .then((payload) => handleBoostRecordsResponse(payload, boostAccountId, {
+                    allowAccountSwitch: isBoostRecordsPage()
+                }))
                 .catch((err) => console.error('[USDT计算器] 解析 Boost records 数据出错', err));
         }
 
@@ -3447,9 +3505,10 @@
             }
 
             if (boostAccountId) {
-                cacheBoostAccountId(boostAccountId);
                 try {
-                    handleBoostRecordsResponse(JSON.parse(this.responseText), boostAccountId);
+                    handleBoostRecordsResponse(JSON.parse(this.responseText), boostAccountId, {
+                        allowAccountSwitch: isBoostRecordsPage()
+                    });
                 } catch (err) {
                     console.error('[USDT计算器] 解析 XHR Boost records 数据出错', err);
                 }
@@ -3616,7 +3675,7 @@
         const boostStatus = document.getElementById('boost-auto-status');
 
         return {
-            version: '1.0.4',
+            version: '1.1.8',
             ready: Boolean(calculatorPanelEl),
             legacyUserscriptDetected: hasVisibleLegacyUserscriptPanel(),
             url: window.location.href,
