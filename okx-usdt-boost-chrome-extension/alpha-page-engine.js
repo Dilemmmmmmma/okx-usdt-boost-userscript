@@ -3000,6 +3000,7 @@ let stableMaxLagSec = STABLE_MAX_LAG_SEC_CONST;
         if (await guardBeforeNewBuy(sessionToken)) {
           return;
         }
+        const preservedReversePrice = captureManualReverseOrderPrice();
         TabManager.click(currentTabIndex);
         if (!running || sessionToken !== opToken) return;
         if (reverseOrderEnabled) { await ensureReverseChecked(1500); }
@@ -3015,7 +3016,7 @@ let stableMaxLagSec = STABLE_MAX_LAG_SEC_CONST;
         if (!running || sessionToken !== opToken) return;
         await DelayManager.ifSwitchDelayEnabled();
         if (!running || sessionToken !== opToken) return;
-        await preTradeSequence(sessionToken);
+        await preTradeSequence(sessionToken, preservedReversePrice);
       }, 'runLoop main loop', async (error) => {
         stop();
         return null;
@@ -3230,9 +3231,12 @@ let stableMaxLagSec = STABLE_MAX_LAG_SEC_CONST;
     stop();
   }
 
-    async function preTradeSequence(sessionToken) {
+  async function preTradeSequence(sessionToken, reversePriceSnapshot = null) {
     if (inTradeFlow) return;
     let advanced = false;
+    const preservedReversePrice = reversePriceSnapshot === null
+      ? captureManualReverseOrderPrice()
+      : reversePriceSnapshot;
     try {
       inTradeFlow = true;
       if (!running || sessionToken !== opToken) return;
@@ -3244,6 +3248,7 @@ let stableMaxLagSec = STABLE_MAX_LAG_SEC_CONST;
       if (!running || sessionToken !== opToken) return;
       await randomSleep(); // 滑块设置后随机等待
       if (!running || sessionToken !== opToken) return;
+      await restoreManualReverseOrderPrice(preservedReversePrice);
       if (uptrendOrderEnabled) {
         const ok = uptrendConsecCount >= uptrendRequiredCount;
         if (!ok) {
@@ -3259,6 +3264,7 @@ let stableMaxLagSec = STABLE_MAX_LAG_SEC_CONST;
         await DelayManager.ifSwitchDelayEnabled();
         return;
       }
+      await restoreManualReverseOrderPrice(preservedReversePrice);
       clickFirstButton();
       if (!running || sessionToken !== opToken) return;
       await sleep(PRE_AFTER_FIRST_BTN_DELAY_MS);
@@ -4672,7 +4678,7 @@ let stableMaxLagSec = STABLE_MAX_LAG_SEC_CONST;
 
   function alphaExtensionState() {
     return {
-      version: '1.1.10',
+      version: '1.1.11',
       ready: Boolean(inputAmount && btnStart),
       legacyUserscriptDetected: alphaHasVisibleLegacyPanel(),
       status: alphaExtensionStatus,
@@ -5117,6 +5123,31 @@ let stableMaxLagSec = STABLE_MAX_LAG_SEC_CONST;
   function hasMeaningfulReversePrice(text) {
     const n = parseReversePriceValue(text);
     return Number.isFinite(n) && n > 0;
+  }
+
+  function captureManualReverseOrderPrice() {
+    if (!reverseOrderEnabled || volatilityLimitEnabled) return '';
+    const input = findReverseOrderPriceInput();
+    const value = String(input && input.value || '').trim();
+    return hasMeaningfulReversePrice(value) ? value : '';
+  }
+
+  async function restoreManualReverseOrderPrice(value) {
+    if (!reverseOrderEnabled || volatilityLimitEnabled || !hasMeaningfulReversePrice(value)) return false;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const input = findReverseOrderPriceInput();
+      if (!input) {
+        await sleep(100);
+        continue;
+      }
+      if (String(input.value || '').trim() !== value) {
+        simulateRealMouseClick(input);
+        if (!setNativeInputValue(input, value)) return false;
+      }
+      await sleep(120);
+      if (String(input.value || '').trim() === value) return true;
+    }
+    return false;
   }
 
   async function syncReverseOrderPriceInput(fallbackPrice = '', options = {}) {
