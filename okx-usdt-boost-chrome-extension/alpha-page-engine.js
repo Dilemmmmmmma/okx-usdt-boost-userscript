@@ -2708,7 +2708,7 @@ let stableMaxLagSec = STABLE_MAX_LAG_SEC_CONST;
 
       if (currentTabIndex === 0 && reverseOrderEnabled) {
         try {
-          await syncReverseOrderPriceInput('', { onlyIfEmpty: false });
+          await syncReverseOrderPriceInput('', { onlyIfEmpty: true });
         } catch (_) {}
       }
     }
@@ -4672,7 +4672,7 @@ let stableMaxLagSec = STABLE_MAX_LAG_SEC_CONST;
 
   function alphaExtensionState() {
     return {
-      version: '1.1.9',
+      version: '1.1.10',
       ready: Boolean(inputAmount && btnStart),
       legacyUserscriptDetected: alphaHasVisibleLegacyPanel(),
       status: alphaExtensionStatus,
