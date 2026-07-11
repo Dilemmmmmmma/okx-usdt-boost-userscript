@@ -2996,11 +2996,10 @@ let stableMaxLagSec = STABLE_MAX_LAG_SEC_CONST;
         if (await guardBeforeNewBuy(sessionToken)) {
           return;
         }
-        if (!reverseOrderEnabled || !findReverseOrderSwitchNode()) {
+        if (!reverseOrderEnabled || (!isReverseOrderUiExpanded() && !findReverseOrderSwitchNode())) {
           TabManager.click(currentTabIndex);
         }
         if (!running || sessionToken !== opToken) return;
-        if (reverseOrderEnabled) { await ensureReverseChecked(1500); }
         const gateOk = uptrendOrderEnabled
           ? await waitForUptrendIfNeeded(sessionToken)
           : await waitForStabilityIfNeeded(sessionToken);
@@ -4670,7 +4669,7 @@ let stableMaxLagSec = STABLE_MAX_LAG_SEC_CONST;
 
   function alphaExtensionState() {
     return {
-      version: '1.1.12',
+      version: '1.1.13',
       ready: Boolean(inputAmount && btnStart),
       legacyUserscriptDetected: alphaHasVisibleLegacyPanel(),
       status: alphaExtensionStatus,
@@ -4998,6 +4997,16 @@ let stableMaxLagSec = STABLE_MAX_LAG_SEC_CONST;
     return limitTotal ? limitTotal.input : null;
   }
 
+  function isReverseOrderUiExpanded() {
+    try {
+      const priceInputs = Array.from(document.querySelectorAll('input#limitPrice, input#limitTotal'))
+        .filter(input => isNodeVisible(input) && !(input.closest && input.closest('#alpha-extension-engine-container')));
+      return priceInputs.some(input => input.id === 'limitTotal') || priceInputs.length >= 2;
+    } catch (_) {
+      return false;
+    }
+  }
+
   function getVisibleLimitPriceValue() {
     const candidates = [];
     try {
@@ -5140,8 +5149,9 @@ let stableMaxLagSec = STABLE_MAX_LAG_SEC_CONST;
 
   async function enforceReverseOrder(options = {}) {
     if (!reverseOrderEnabled) return false;
+    if (!volatilityLimitEnabled && isReverseOrderUiExpanded()) return true;
     const checked = await ensureReverseChecked(2000);
-    if (!volatilityLimitEnabled) return checked;
+    if (!volatilityLimitEnabled) return checked || isReverseOrderUiExpanded();
     if (!checked && !findReverseOrderPriceInput()) return false;
     return await syncReverseOrderPriceInput(options.fallbackPrice || '', options);
   }
