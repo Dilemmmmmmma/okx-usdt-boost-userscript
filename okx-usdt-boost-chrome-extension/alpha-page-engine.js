@@ -4327,8 +4327,8 @@ let stableMaxLagSec = STABLE_MAX_LAG_SEC_CONST;
     const realtimeStatsLabel = document.createElement('label'); realtimeStatsLabel.textContent = '实时统计'; realtimeStatsLabel.htmlFor = 'realtimeStatsCheckbox'; realtimeStatsLabel.style.marginLeft = '4px';
     const realtimeStatsGroup = document.createElement('span'); realtimeStatsGroup.appendChild(realtimeStatsCheckbox); realtimeStatsGroup.appendChild(realtimeStatsLabel);
     realtimeStatsGroup.style.display = 'none';
-    reverseOrderCheckbox = document.createElement('input'); reverseOrderCheckbox.type = 'checkbox'; reverseOrderCheckbox.id = 'reverseOrderCheckbox'; reverseOrderCheckbox.checked = reverseOrderEnabled; reverseOrderCheckbox.disabled = !volatilityLimitEnabled;
-    const reverseOrderLabel = document.createElement('label'); reverseOrderLabel.textContent = '反向订单'; reverseOrderLabel.htmlFor = 'reverseOrderCheckbox'; reverseOrderLabel.style.marginLeft = '4px'; reverseOrderLabel.style.opacity = reverseOrderCheckbox.disabled ? '0.5' : '1';
+    reverseOrderCheckbox = document.createElement('input'); reverseOrderCheckbox.type = 'checkbox'; reverseOrderCheckbox.id = 'reverseOrderCheckbox'; reverseOrderCheckbox.checked = reverseOrderEnabled;
+    const reverseOrderLabel = document.createElement('label'); reverseOrderLabel.textContent = '反向订单'; reverseOrderLabel.htmlFor = 'reverseOrderCheckbox'; reverseOrderLabel.style.marginLeft = '4px';
     const reverseOrderGroup = document.createElement('span'); reverseOrderGroup.appendChild(reverseOrderCheckbox); reverseOrderGroup.appendChild(reverseOrderLabel);
     try {
       realtimeStatsEnabled = true;
@@ -4774,9 +4774,8 @@ let stableMaxLagSec = STABLE_MAX_LAG_SEC_CONST;
         if (payload.volatilityLimitEnabled !== undefined && payload.volatilityLimitEnabled !== null) {
           volatilityLimitEnabled = Boolean(payload.volatilityLimitEnabled);
           localStorage.setItem(STORAGE_KEYS.volatilityLimitEnabled, String(volatilityLimitEnabled));
-          if (reverseOrderCheckbox) reverseOrderCheckbox.disabled = !volatilityLimitEnabled;
         }
-        alphaSetCheckbox(reverseOrderCheckbox, volatilityLimitEnabled && Boolean(payload.reverseOrderEnabled));
+        alphaSetCheckbox(reverseOrderCheckbox, Boolean(payload.reverseOrderEnabled));
         renewData();
         alphaExtensionStatus = '设置已生效';
         return { ok: true, state: alphaExtensionState() };
