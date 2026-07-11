@@ -89,8 +89,7 @@
       'alpha-run-button', 'alpha-clear-button', 'alpha-target',
       'refresh-button',
       'alpha-sell-slider', 'alpha-buy-min', 'alpha-buy-max', 'alpha-cycle-min',
-      'alpha-cycle-max', 'alpha-buy-wait', 'alpha-sell-wait', 'alpha-stable-toggle',
-      'alpha-order-monitor-toggle', 'alpha-reverse-toggle', 'alpha-volatility-toggle'
+      'alpha-cycle-max', 'alpha-buy-wait', 'alpha-sell-wait'
     ], !ready);
   }
 
@@ -147,10 +146,10 @@
       cycleTimeMax: $('alpha-cycle-max').value,
       buyOrderWaitSec: $('alpha-buy-wait').value,
       sellOrderWaitSec: $('alpha-sell-wait').value,
-      stableDetectEnabled: $('alpha-stable-toggle').checked,
-      orderMonitorEnabled: $('alpha-order-monitor-toggle').checked,
-      reverseOrderEnabled: $('alpha-reverse-toggle').checked,
-      volatilityLimitEnabled: $('alpha-volatility-toggle').checked
+      stableDetectEnabled: false,
+      orderMonitorEnabled: false,
+      reverseOrderEnabled: true,
+      volatilityLimitEnabled: false
     };
   }
 
@@ -282,12 +281,6 @@
       setInputValue('alpha-sell-wait', settings.sellOrderWaitSec, true);
       loadedAlphaForm = true;
     }
-    if (!alphaSettingsDirty) {
-      $('alpha-stable-toggle').checked = Boolean(controls.stableDetectEnabled);
-      $('alpha-order-monitor-toggle').checked = Boolean(controls.orderMonitorEnabled);
-      $('alpha-reverse-toggle').checked = Boolean(controls.reverseOrderEnabled);
-      $('alpha-volatility-toggle').checked = Boolean(controls.volatilityLimitEnabled);
-    }
     if (activeWorkspace === 'alpha') setFooter(legacy ? '请停用旧 Alpha 篡改猴脚本后再启动扩展' : state.running ? 'Alpha 自动交易运行中' : 'Alpha 工作台已就绪', legacy);
   }
 
@@ -389,9 +382,6 @@
     });
     ['alpha-target', 'alpha-sell-slider', 'alpha-buy-min', 'alpha-buy-max', 'alpha-cycle-min', 'alpha-cycle-max', 'alpha-buy-wait', 'alpha-sell-wait'].forEach((id) => {
       $(id).addEventListener('input', scheduleAlphaAutosave);
-      $(id).addEventListener('change', scheduleAlphaAutosave);
-    });
-    ['alpha-stable-toggle', 'alpha-order-monitor-toggle', 'alpha-reverse-toggle', 'alpha-volatility-toggle'].forEach((id) => {
       $(id).addEventListener('change', scheduleAlphaAutosave);
     });
   }

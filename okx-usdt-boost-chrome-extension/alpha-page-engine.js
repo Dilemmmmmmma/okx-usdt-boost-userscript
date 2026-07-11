@@ -1603,8 +1603,8 @@
       localStorage.setItem('afterPairWaitEnabled', 'false');
       localStorage.setItem('afterPairWaitMinSec', String(afterPairWaitMinSec));
       localStorage.setItem('afterPairWaitMaxSec', String(afterPairWaitMaxSec));
-      volatilityLimitEnabled = true;
-      localStorage.setItem('volatilityLimitEnabled', 'true');
+      volatilityLimitEnabled = false;
+      localStorage.setItem('volatilityLimitEnabled', 'false');
       buySliderValue = 95;
       buySliderMin = 90;
       buySliderMax = 100;
@@ -1625,10 +1625,20 @@
       localStorage.setItem('buySliderMax', String(buySliderMax));
       localStorage.setItem('sellSliderValue', String(sellSliderValue));
       if (orderMonitorCheckbox) {
-        orderMonitorCheckbox.checked = true;
+        orderMonitorCheckbox.checked = false;
         orderMonitorCheckbox.dispatchEvent(new Event('change', { bubbles: true }));
       }
-      localStorage.setItem('orderMonitorEnabled', 'true');
+      localStorage.setItem('orderMonitorEnabled', 'false');
+      if (reverseOrderCheckbox) {
+        reverseOrderCheckbox.checked = true;
+        reverseOrderCheckbox.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+      localStorage.setItem('reverseOrderEnabled', 'true');
+      if (stableCheckbox) {
+        stableCheckbox.checked = false;
+        stableCheckbox.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+      localStorage.setItem('stableDetectEnabled', 'false');
       uptrendOrderEnabled = false;
       if (typeof upCheckbox !== 'undefined' && upCheckbox) {
         upCheckbox.checked = false;
@@ -1695,7 +1705,7 @@
   let inputAmount, btnStart, btnClear, totalAmountDisplay, buyAmountDisplay, integralDisplay, tokenRecordsContainer;
   let currentTokenDisplay;
   let cycleTimeMinInput, cycleTimeMaxInput;
-  let volatilityLimitEnabled = StorageLoader.bool('volatilityLimitEnabled', true);
+  let volatilityLimitEnabled = false;
   let orderMonitorCheckbox, switchDelayCheckbox;
   let buyOrderWaitInput, sellOrderWaitInput;
   let volatilityRangeDisplay;
@@ -1990,10 +2000,10 @@
   }
 
 
-  let orderMonitorPersisted = StorageLoader.bool('orderMonitorEnabled', true);
+  let orderMonitorPersisted = false;
   let rememberPositionEnabled = StorageLoader.bool('rememberPositionEnabled', false);
   let rememberPositionCheckbox;
-  let reverseOrderEnabled = StorageLoader.bool('reverseOrderEnabled', false);
+  let reverseOrderEnabled = true;
   let reverseOrderInitialFillArmed = true;
   let reverseOrderInitialFillDone = false;
   let reverseOrderCheckbox;
@@ -2005,7 +2015,13 @@
   let clickIntervalMax = StorageLoader.num('clickIntervalMax', 3000);
   let clickIntervalMinInput;
   let clickIntervalMaxInput;
-  let stableDetectEnabled = StorageLoader.bool('stableDetectEnabled', true);
+  let stableDetectEnabled = false;
+  try {
+    localStorage.setItem('stableDetectEnabled', 'false');
+    localStorage.setItem('orderMonitorEnabled', 'false');
+    localStorage.setItem('reverseOrderEnabled', 'true');
+    localStorage.setItem('volatilityLimitEnabled', 'false');
+  } catch (_) {}
   let stableWindowSec = DEFAULT_STABLE_WINDOW_SEC;
   let stableTolerancePct = DEFAULT_STABLE_TOLERANCE_PCT;
   let stableMinSamples = STABLE_MIN_SAMPLES_CONST;
@@ -4666,7 +4682,7 @@ let stableMaxLagSec = STABLE_MAX_LAG_SEC_CONST;
 
   function alphaExtensionState() {
     return {
-      version: '1.1.8',
+      version: '1.1.14',
       ready: Boolean(inputAmount && btnStart),
       legacyUserscriptDetected: alphaHasVisibleLegacyPanel(),
       status: alphaExtensionStatus,
@@ -4769,13 +4785,11 @@ let stableMaxLagSec = STABLE_MAX_LAG_SEC_CONST;
         alphaSetInput(cycleTimeMaxInput, payload.cycleTimeMax);
         alphaSetInput(buyOrderWaitInput, payload.buyOrderWaitSec);
         alphaSetInput(sellOrderWaitInput, payload.sellOrderWaitSec);
-        alphaSetCheckbox(stableCheckbox, payload.stableDetectEnabled);
-        alphaSetCheckbox(orderMonitorCheckbox, payload.orderMonitorEnabled);
-        if (payload.volatilityLimitEnabled !== undefined && payload.volatilityLimitEnabled !== null) {
-          volatilityLimitEnabled = Boolean(payload.volatilityLimitEnabled);
-          localStorage.setItem(STORAGE_KEYS.volatilityLimitEnabled, String(volatilityLimitEnabled));
-        }
-        alphaSetCheckbox(reverseOrderCheckbox, Boolean(payload.reverseOrderEnabled));
+        alphaSetCheckbox(stableCheckbox, false);
+        alphaSetCheckbox(orderMonitorCheckbox, false);
+        volatilityLimitEnabled = false;
+        localStorage.setItem(STORAGE_KEYS.volatilityLimitEnabled, 'false');
+        alphaSetCheckbox(reverseOrderCheckbox, true);
         renewData();
         alphaExtensionStatus = '设置已生效';
         return { ok: true, state: alphaExtensionState() };
@@ -5114,7 +5128,7 @@ let stableMaxLagSec = STABLE_MAX_LAG_SEC_CONST;
   }
 
   async function syncReverseOrderPriceInput(fallbackPrice = '', options = {}) {
-    if (!reverseOrderEnabled) return false;
+    if (!reverseOrderEnabled || !volatilityLimitEnabled) return false;
     const value = await resolveReverseOrderPrice(fallbackPrice, options);
     if (!hasMeaningfulReversePrice(value)) return false;
     for (let i = 0; i < 16; i++) {
@@ -5137,6 +5151,7 @@ let stableMaxLagSec = STABLE_MAX_LAG_SEC_CONST;
   async function enforceReverseOrder(options = {}) {
     if (!reverseOrderEnabled) return false;
     const checked = await ensureReverseChecked(2000);
+    if (!volatilityLimitEnabled) return checked;
     if (!checked && !findReverseOrderPriceInput()) return false;
     return await syncReverseOrderPriceInput(options.fallbackPrice || '', options);
   }
