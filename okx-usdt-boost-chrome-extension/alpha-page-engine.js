@@ -2661,7 +2661,6 @@ let stableMaxLagSec = STABLE_MAX_LAG_SEC_CONST;
 
   const TradingEngine = {
     async preClick() {
-        if (!volatilityLimitEnabled) return;
         const input = Array.from(document.querySelectorAll('input#limitPrice')).find(el => isNodeVisible(el)) || document.querySelector('input#limitPrice');
         if (input) {
       let desired = null;
@@ -2706,7 +2705,6 @@ let stableMaxLagSec = STABLE_MAX_LAG_SEC_CONST;
         return;
         } catch (_) {}
       }
-
     }
     const path = '//*[@id="__APP"]/div[2]/div[7]/div/div[2]/div[3]/div[1]/div[1]/div[2]/div[2]';
     const elem = $xpath(path);
@@ -2996,10 +2994,9 @@ let stableMaxLagSec = STABLE_MAX_LAG_SEC_CONST;
         if (await guardBeforeNewBuy(sessionToken)) {
           return;
         }
-        if (!reverseOrderEnabled || (!isReverseOrderUiExpanded() && !findReverseOrderSwitchNode())) {
-          TabManager.click(currentTabIndex);
-        }
+        TabManager.click(currentTabIndex);
         if (!running || sessionToken !== opToken) return;
+        if (reverseOrderEnabled) { await ensureReverseChecked(1500); }
         const gateOk = uptrendOrderEnabled
           ? await waitForUptrendIfNeeded(sessionToken)
           : await waitForStabilityIfNeeded(sessionToken);
@@ -3227,7 +3224,7 @@ let stableMaxLagSec = STABLE_MAX_LAG_SEC_CONST;
     stop();
   }
 
-  async function preTradeSequence(sessionToken) {
+    async function preTradeSequence(sessionToken) {
     if (inTradeFlow) return;
     let advanced = false;
     try {
@@ -4330,8 +4327,8 @@ let stableMaxLagSec = STABLE_MAX_LAG_SEC_CONST;
     const realtimeStatsLabel = document.createElement('label'); realtimeStatsLabel.textContent = '实时统计'; realtimeStatsLabel.htmlFor = 'realtimeStatsCheckbox'; realtimeStatsLabel.style.marginLeft = '4px';
     const realtimeStatsGroup = document.createElement('span'); realtimeStatsGroup.appendChild(realtimeStatsCheckbox); realtimeStatsGroup.appendChild(realtimeStatsLabel);
     realtimeStatsGroup.style.display = 'none';
-    reverseOrderCheckbox = document.createElement('input'); reverseOrderCheckbox.type = 'checkbox'; reverseOrderCheckbox.id = 'reverseOrderCheckbox'; reverseOrderCheckbox.checked = reverseOrderEnabled;
-    const reverseOrderLabel = document.createElement('label'); reverseOrderLabel.textContent = '反向订单'; reverseOrderLabel.htmlFor = 'reverseOrderCheckbox'; reverseOrderLabel.style.marginLeft = '4px';
+    reverseOrderCheckbox = document.createElement('input'); reverseOrderCheckbox.type = 'checkbox'; reverseOrderCheckbox.id = 'reverseOrderCheckbox'; reverseOrderCheckbox.checked = reverseOrderEnabled; reverseOrderCheckbox.disabled = !volatilityLimitEnabled;
+    const reverseOrderLabel = document.createElement('label'); reverseOrderLabel.textContent = '反向订单'; reverseOrderLabel.htmlFor = 'reverseOrderCheckbox'; reverseOrderLabel.style.marginLeft = '4px'; reverseOrderLabel.style.opacity = reverseOrderCheckbox.disabled ? '0.5' : '1';
     const reverseOrderGroup = document.createElement('span'); reverseOrderGroup.appendChild(reverseOrderCheckbox); reverseOrderGroup.appendChild(reverseOrderLabel);
     try {
       realtimeStatsEnabled = true;
@@ -4669,7 +4666,7 @@ let stableMaxLagSec = STABLE_MAX_LAG_SEC_CONST;
 
   function alphaExtensionState() {
     return {
-      version: '1.1.13',
+      version: '1.1.8',
       ready: Boolean(inputAmount && btnStart),
       legacyUserscriptDetected: alphaHasVisibleLegacyPanel(),
       status: alphaExtensionStatus,
@@ -4777,8 +4774,9 @@ let stableMaxLagSec = STABLE_MAX_LAG_SEC_CONST;
         if (payload.volatilityLimitEnabled !== undefined && payload.volatilityLimitEnabled !== null) {
           volatilityLimitEnabled = Boolean(payload.volatilityLimitEnabled);
           localStorage.setItem(STORAGE_KEYS.volatilityLimitEnabled, String(volatilityLimitEnabled));
+          if (reverseOrderCheckbox) reverseOrderCheckbox.disabled = !volatilityLimitEnabled;
         }
-        alphaSetCheckbox(reverseOrderCheckbox, Boolean(payload.reverseOrderEnabled));
+        alphaSetCheckbox(reverseOrderCheckbox, volatilityLimitEnabled && Boolean(payload.reverseOrderEnabled));
         renewData();
         alphaExtensionStatus = '设置已生效';
         return { ok: true, state: alphaExtensionState() };
@@ -4997,16 +4995,6 @@ let stableMaxLagSec = STABLE_MAX_LAG_SEC_CONST;
     return limitTotal ? limitTotal.input : null;
   }
 
-  function isReverseOrderUiExpanded() {
-    try {
-      const priceInputs = Array.from(document.querySelectorAll('input#limitPrice, input#limitTotal'))
-        .filter(input => isNodeVisible(input) && !(input.closest && input.closest('#alpha-extension-engine-container')));
-      return priceInputs.some(input => input.id === 'limitTotal') || priceInputs.length >= 2;
-    } catch (_) {
-      return false;
-    }
-  }
-
   function getVisibleLimitPriceValue() {
     const candidates = [];
     try {
@@ -5127,7 +5115,7 @@ let stableMaxLagSec = STABLE_MAX_LAG_SEC_CONST;
   }
 
   async function syncReverseOrderPriceInput(fallbackPrice = '', options = {}) {
-    if (!reverseOrderEnabled || !volatilityLimitEnabled) return false;
+    if (!reverseOrderEnabled) return false;
     const value = await resolveReverseOrderPrice(fallbackPrice, options);
     if (!hasMeaningfulReversePrice(value)) return false;
     for (let i = 0; i < 16; i++) {
@@ -5149,9 +5137,7 @@ let stableMaxLagSec = STABLE_MAX_LAG_SEC_CONST;
 
   async function enforceReverseOrder(options = {}) {
     if (!reverseOrderEnabled) return false;
-    if (!volatilityLimitEnabled && isReverseOrderUiExpanded()) return true;
     const checked = await ensureReverseChecked(2000);
-    if (!volatilityLimitEnabled) return checked || isReverseOrderUiExpanded();
     if (!checked && !findReverseOrderPriceInput()) return false;
     return await syncReverseOrderPriceInput(options.fallbackPrice || '', options);
   }
