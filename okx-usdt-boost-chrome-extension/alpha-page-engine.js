@@ -4682,7 +4682,7 @@ let stableMaxLagSec = STABLE_MAX_LAG_SEC_CONST;
 
   function alphaExtensionState() {
     return {
-      version: '1.2.6',
+      version: '1.2.7',
       ready: Boolean(inputAmount && btnStart),
       legacyUserscriptDetected: alphaHasVisibleLegacyPanel(),
       status: alphaExtensionStatus,
