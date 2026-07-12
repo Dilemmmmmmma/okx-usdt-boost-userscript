@@ -11,11 +11,11 @@
   let currentBoostState = null;
   let currentAlphaState = null;
   let loadedBoostForm = false;
-  let loadedAlphaForm = false;
   let boostAutosaveTimerId = null;
-  let alphaAutosaveTimerId = null;
-  let alphaSettingsRevision = 0;
-  let alphaSettingsDirty = false;
+  const alphaFormStates = {
+    'alpha-cex': { loaded: false, timerId: null, revision: 0, dirty: false },
+    'alpha-wallet': { loaded: false, timerId: null, revision: 0, dirty: false }
+  };
 
   const $ = (id) => document.getElementById(id);
 
@@ -149,8 +149,8 @@
     };
   }
 
-  function getAlphaPayload() {
-    if (activePageKind === 'alpha-wallet') {
+  function getAlphaPayload(kind = activePageKind) {
+    if (kind === 'alpha-wallet') {
       return {
         targetPoints: $('wallet-alpha-target-input').value,
         shortcutAmount: $('wallet-alpha-shortcut').value,
@@ -177,8 +177,9 @@
     return sendBoost('save-settings', getBoostPayload(), quiet);
   }
 
-  function saveAlphaSettings(quiet = true, renderResponse = false) {
-    return sendAlpha(activePageKind === 'alpha-wallet' ? 'wallet-alpha-save-settings' : 'alpha-save-settings', getAlphaPayload(), quiet, renderResponse);
+  function saveAlphaSettings(quiet = true, renderResponse = false, kind = activePageKind) {
+    if (kind !== activePageKind) return Promise.resolve(null);
+    return sendAlpha(kind === 'alpha-wallet' ? 'wallet-alpha-save-settings' : 'alpha-save-settings', getAlphaPayload(kind), quiet, renderResponse);
   }
 
   function scheduleBoostAutosave() {
@@ -189,16 +190,22 @@
     }, 250);
   }
 
-  function scheduleAlphaAutosave() {
-    const revision = ++alphaSettingsRevision;
-    alphaSettingsDirty = true;
-    window.clearTimeout(alphaAutosaveTimerId);
-    alphaAutosaveTimerId = window.setTimeout(async () => {
-      const result = await saveAlphaSettings(true, false);
-      if (revision !== alphaSettingsRevision) return;
-      alphaSettingsDirty = false;
+  function scheduleAlphaAutosave(kind) {
+    const formState = alphaFormStates[kind];
+    if (!formState || kind !== activePageKind) return;
+    const revision = ++formState.revision;
+    formState.dirty = true;
+    window.clearTimeout(formState.timerId);
+    formState.timerId = window.setTimeout(async () => {
+      if (kind !== activePageKind) {
+        formState.dirty = false;
+        return;
+      }
+      const result = await saveAlphaSettings(true, false, kind);
+      if (revision !== formState.revision) return;
+      formState.dirty = false;
       if (result?.state) renderAlphaState(result.state);
-      else setFooter('Alpha 设置同步失败，请刷新页面后重试', true);
+      else setFooter(`${kind === 'alpha-wallet' ? 'Wallet' : 'CEX'} Alpha 设置同步失败，请刷新页面后重试`, true);
     }, 250);
   }
 
@@ -270,12 +277,15 @@
     const legacy = Boolean(state.legacyUserscriptDetected);
     const ready = Boolean(state.ready) && !legacy;
     const isWallet = state.mode === 'wallet';
+    const formKind = isWallet ? 'alpha-wallet' : 'alpha-cex';
+    const formState = alphaFormStates[formKind];
 
     $('alpha-cex-metrics').classList.toggle('is-hidden', isWallet);
     $('alpha-wallet-metrics').classList.toggle('is-hidden', !isWallet);
     $('alpha-cex-settings').classList.toggle('is-hidden', isWallet);
     $('alpha-wallet-settings').classList.toggle('is-hidden', !isWallet);
     $('alpha-section-title').textContent = isWallet ? 'Wallet Alpha 交易工具' : 'Alpha 交易量工具';
+    $('alpha-settings-title').textContent = isWallet ? 'Wallet 交易参数' : 'CEX 交易参数';
 
     if (activeWorkspace === 'alpha') {
       setConnection(ready, legacy ? '检测到旧 Alpha 篡改猴脚本' : state.ready ? `已连接 Binance ${isWallet ? 'Wallet' : 'CEX'} Alpha 页面` : 'Alpha 页面引擎加载中');
@@ -311,7 +321,7 @@
     $('alpha-run-button').classList.toggle('running', Boolean(state.running));
     $('alpha-run-status').textContent = legacy ? '请先停用旧 Alpha 篡改猴脚本' : state.status || (state.running ? '自动交易运行中' : '未启动');
 
-    if (state.ready && !loadedAlphaForm) {
+    if (state.ready && formState && !formState.loaded && !formState.dirty) {
       if (isWallet) {
         setInputValue('wallet-alpha-target-input', settings.targetPoints, true);
         setInputValue('wallet-alpha-shortcut', settings.shortcutAmount, true);
@@ -326,7 +336,7 @@
         setInputValue('alpha-buy-wait', settings.buyOrderWaitSec, true);
         setInputValue('alpha-sell-wait', settings.sellOrderWaitSec, true);
       }
-      loadedAlphaForm = true;
+      formState.loaded = true;
     }
     if (activeWorkspace === 'alpha') setFooter(legacy ? '请停用旧 Alpha 篡改猴脚本后再启动扩展' : state.running ? `${isWallet ? 'Wallet ' : ''}Alpha 自动交易运行中` : `${isWallet ? 'Wallet ' : ''}Alpha 工作台已就绪`, legacy);
   }
@@ -362,8 +372,14 @@
       const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
       activeTabId = tab?.id || null;
       activePageKind = pageKindFromUrl(tab?.url || '');
+      currentAlphaState = null;
       loadedBoostForm = false;
-      loadedAlphaForm = false;
+      Object.values(alphaFormStates).forEach((formState) => {
+        window.clearTimeout(formState.timerId);
+        formState.timerId = null;
+        formState.dirty = false;
+      });
+      if (alphaFormStates[activePageKind]) alphaFormStates[activePageKind].loaded = false;
       if (!activePageKind) {
         setConnection(false, '请切换到 OKX、Binance CEX 或 Wallet Alpha 页面');
         $('token-context').textContent = '当前页面不支持';
@@ -423,15 +439,6 @@
       if (!currentAlphaState?.running) {
         const saved = await saveAlphaSettings();
         if (!saved) return;
-        if (activePageKind === 'alpha-wallet') {
-          const state = saved.state || currentAlphaState || {};
-          const symbol = state.token?.symbol || '--';
-          const target = Number(state.settings?.targetPoints) || 0;
-          const multiple = Number(state.market?.multiplier) || 0;
-          const shortcut = Number(state.settings?.shortcutAmount) || 0;
-          const required = multiple > 0 ? target / multiple : 0;
-          if (!window.confirm(`确认启动 Wallet Alpha 交易？\n\n代币：${symbol}\n目标积分交易量：${target.toFixed(2)}\nAlpha 倍数：${multiple || '--'}x\n预计实际买入额：${required.toFixed(2)}\n买入快捷值：${shortcut}`)) return;
-        }
       }
       sendAlpha(activePageKind === 'alpha-wallet' ? 'wallet-alpha-toggle-run' : 'alpha-toggle-run');
     });
@@ -441,12 +448,12 @@
       $(id).addEventListener('change', scheduleBoostAutosave);
     });
     ['alpha-target', 'alpha-sell-slider', 'alpha-buy-min', 'alpha-buy-max', 'alpha-cycle-min', 'alpha-cycle-max', 'alpha-buy-wait', 'alpha-sell-wait'].forEach((id) => {
-      $(id).addEventListener('input', scheduleAlphaAutosave);
-      $(id).addEventListener('change', scheduleAlphaAutosave);
+      $(id).addEventListener('input', () => scheduleAlphaAutosave('alpha-cex'));
+      $(id).addEventListener('change', () => scheduleAlphaAutosave('alpha-cex'));
     });
     ['wallet-alpha-target-input', 'wallet-alpha-shortcut', 'wallet-alpha-timeout'].forEach((id) => {
-      $(id).addEventListener('input', scheduleAlphaAutosave);
-      $(id).addEventListener('change', scheduleAlphaAutosave);
+      $(id).addEventListener('input', () => scheduleAlphaAutosave('alpha-wallet'));
+      $(id).addEventListener('change', () => scheduleAlphaAutosave('alpha-wallet'));
     });
   }
 

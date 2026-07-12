@@ -4,7 +4,7 @@
   if (window.__WALLET_ALPHA_EXTENSION_ENGINE__) return;
   window.__WALLET_ALPHA_EXTENSION_ENGINE__ = true;
 
-  const VERSION = '1.2.2';
+  const VERSION = '1.2.3';
   const CHANNEL_KEY = '__walletAlphaExtension';
   const TAG_API = '/bapi/defi/v1/public/wallet-direct/buw/wallet/dex/market/token/tag/info';
   const META_API = '/bapi/defi/v1/public/wallet-direct/buw/wallet/dex/market/token/meta/info';
@@ -284,8 +284,30 @@
     return null;
   }
 
+  function visibleElementsWithin(root, selector) {
+    if (!root?.querySelectorAll) return [];
+    return Array.from(root.querySelectorAll(selector)).filter(isVisible);
+  }
+
+  function findOneClickPanelRoot() {
+    const shortcuts = visibleElements('[aria-label^="Shortcut "], [aria-label^="快捷 "]');
+    for (const shortcut of shortcuts) {
+      let ancestor = shortcut.parentElement;
+      while (ancestor && ancestor !== document.body) {
+        const hasBuyTab = visibleElementsWithin(ancestor, '[data-tab-key="BUY"]').length > 0;
+        const hasSellTab = visibleElementsWithin(ancestor, '[data-tab-key="SELL"]').length > 0;
+        if (hasBuyTab && hasSellTab) return ancestor;
+        ancestor = ancestor.parentElement;
+      }
+    }
+    return null;
+  }
+
   function findTab(key) {
-    const matches = visibleElements(`[data-tab-key="${key}"]`);
+    const panelRoot = /^(BUY|SELL)$/.test(key) ? findOneClickPanelRoot() : null;
+    const matches = panelRoot
+      ? visibleElementsWithin(panelRoot, `[data-tab-key="${key}"]`)
+      : visibleElements(`[data-tab-key="${key}"]`);
     return matches.length === 1 ? matches[0] : null;
   }
 
@@ -308,7 +330,10 @@
     const exactLabels = side === 'sell'
       ? [`Shortcut ${normalized}`, `快捷 ${normalized}`, `${normalized}%`]
       : [`Shortcut ${normalized}`, `快捷 ${normalized}`];
-    const visibleButtons = visibleElements('[role="button"], button');
+    const panelRoot = findOneClickPanelRoot();
+    const visibleButtons = panelRoot
+      ? visibleElementsWithin(panelRoot, '[role="button"], button')
+      : visibleElements('[role="button"], button');
     const ariaCandidates = visibleButtons.filter((element) => {
       const aria = String(element.getAttribute('aria-label') || '').trim();
       return exactLabels.includes(aria);
@@ -324,11 +349,13 @@
   }
 
   async function ensureTradePanel() {
-    if (findTab('BUY') && findTab('SELL')) return true;
+    if (findOneClickPanelRoot()) return true;
     const buttons = visibleElements('button,[role="button"]').filter((element) => /一键买卖|one.?click/i.test(`${element.getAttribute('aria-label') || ''} ${element.textContent || ''}`));
     if (buttons.length !== 1) throw new Error('一键买卖按钮未找到或不唯一');
+    status = '一键买卖面板未打开，正在打开';
+    postState();
     clickElement(buttons[0]);
-    const ready = await waitUntil(() => findTab('BUY') && findTab('SELL'), 5000, 100);
+    const ready = await waitUntil(findOneClickPanelRoot, 5000, 100);
     if (!ready) throw new Error('一键买卖面板未能打开');
     return true;
   }
