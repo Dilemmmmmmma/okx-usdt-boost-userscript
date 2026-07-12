@@ -117,6 +117,7 @@ button, input { font: inherit; }
 .metric-list { display: grid; gap: 5px; }
 .metric-row { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; min-height: 18px; color: var(--muted); }
 .metric-row strong { color: var(--text); font-weight: 600; text-align: right; font-variant-numeric: tabular-nums; }
+#wallet-alpha-multiplier-source { max-width: 62%; overflow-wrap: anywhere; }
 .positive { color: var(--positive) !important; }
 .negative { color: var(--danger) !important; }
 .pending { color: #d3d3d3 !important; }

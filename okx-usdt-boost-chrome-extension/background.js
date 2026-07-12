@@ -1,11 +1,13 @@
 const OKX_HOSTS = new Set(['web3.okx.com', 'web3.cnouxyex.co']);
 const BINANCE_HOST = 'www.binance.com';
+const BINANCE_WALLET_HOST = 'web3.binance.com';
 
 function getWorkspaceForUrl(url) {
   try {
     const parsed = new URL(url);
     if (OKX_HOSTS.has(parsed.hostname)) return 'boost';
-    if (parsed.hostname === BINANCE_HOST && parsed.pathname.startsWith('/zh-CN/alpha/')) return 'alpha';
+    if (parsed.hostname === BINANCE_HOST && /^\/[^/]+\/alpha\//.test(parsed.pathname)) return 'alpha-cex';
+    if (parsed.hostname === BINANCE_WALLET_HOST && /^\/[^/]+\/token\/[^/]+\/[^/]+/.test(parsed.pathname)) return 'alpha-wallet';
   } catch {}
   return null;
 }
@@ -32,8 +34,16 @@ async function ensurePageEngine(tabId, url) {
     return { ok: false, error: '当前页面不支持交易助手' };
   }
 
-  const pageEngine = workspace === 'alpha' ? 'alpha-page-engine.js' : 'page-engine.js';
-  const contentBridge = workspace === 'alpha' ? 'alpha-content-bridge.js' : 'content-bridge.js';
+  const pageEngine = workspace === 'alpha-cex'
+    ? 'alpha-page-engine.js'
+    : workspace === 'alpha-wallet'
+      ? 'wallet-alpha-page-engine.js'
+      : 'page-engine.js';
+  const contentBridge = workspace === 'alpha-cex'
+    ? 'alpha-content-bridge.js'
+    : workspace === 'alpha-wallet'
+      ? 'wallet-alpha-content-bridge.js'
+      : 'content-bridge.js';
 
   await chrome.scripting.executeScript({
     target: { tabId },

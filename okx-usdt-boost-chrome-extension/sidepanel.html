@@ -80,9 +80,9 @@
 
       <div id="alpha-workspace" class="workspace is-hidden">
         <section class="section alpha-overview">
-          <div class="section-heading"><span>Alpha 交易量工具</span></div>
+          <div class="section-heading"><span id="alpha-section-title">Alpha 交易量工具</span></div>
           <div class="alpha-token-row"><strong id="alpha-token">--</strong><span id="alpha-market-trend">--</span></div>
-          <div class="metric-list">
+          <div id="alpha-cex-metrics" class="metric-list">
             <div class="metric-row"><span>今日成交</span><strong id="alpha-daily-volume">--</strong></div>
             <div class="metric-row"><span>昨日成交</span><strong id="alpha-yesterday-volume">--</strong></div>
             <div class="metric-row"><span>积分倍数</span><strong id="alpha-multiplier">--</strong></div>
@@ -91,13 +91,22 @@
             <div class="metric-row"><span>积分</span><strong id="alpha-integral">--</strong></div>
             <div class="metric-row"><span>余额磨损</span><strong id="alpha-wear">--</strong></div>
           </div>
+          <div id="alpha-wallet-metrics" class="metric-list is-hidden">
+            <div class="metric-row"><span>Alpha 倍数</span><strong id="wallet-alpha-multiplier">--</strong></div>
+            <div class="metric-row"><span>倍数来源</span><strong id="wallet-alpha-multiplier-source">--</strong></div>
+            <div class="metric-row"><span>目标积分交易量</span><strong id="wallet-alpha-target">--</strong></div>
+            <div class="metric-row"><span>所需实际买入额</span><strong id="wallet-alpha-required">--</strong></div>
+            <div class="metric-row"><span>累计实际买入额</span><strong id="wallet-alpha-actual">--</strong></div>
+            <div class="metric-row"><span>累计积分交易量</span><strong id="wallet-alpha-points">--</strong></div>
+            <div class="metric-row"><span>完成轮次</span><strong id="wallet-alpha-rounds">--</strong></div>
+          </div>
           <button id="alpha-run-button" class="primary-button binance-primary" type="button">启动 Alpha 交易</button>
           <div id="alpha-run-status" class="status-line">等待 Binance Alpha 页面</div>
         </section>
 
         <section class="section alpha-settings">
           <div class="section-heading"><span>交易参数</span><button id="alpha-clear-button" class="text-button" type="button">清除记录</button></div>
-          <div class="form-grid">
+          <div id="alpha-cex-settings" class="form-grid">
             <label>目标交易额<input id="alpha-target" type="number" min="0" step="0.01" value="0"></label>
             <label>卖出滑块(%)<input id="alpha-sell-slider" type="number" min="0" max="100" step="0.1" value="99.7"></label>
             <label>买入滑块下限(%)<input id="alpha-buy-min" type="number" min="0" max="100" step="0.1" value="90"></label>
@@ -107,6 +116,12 @@
             <label>买单等待(秒)<input id="alpha-buy-wait" type="number" min="1" step="1" value="10"></label>
             <label>卖单等待(秒)<input id="alpha-sell-wait" type="number" min="1" step="1" value="10"></label>
           </div>
+          <div id="alpha-wallet-settings" class="form-grid is-hidden">
+            <label>目标积分交易量<input id="wallet-alpha-target-input" type="number" min="0" step="0.01" value="0"></label>
+            <label>买入快捷值<input id="wallet-alpha-shortcut" type="number" min="0.01" step="0.01" value="20"></label>
+            <label>订单超时(秒)<input id="wallet-alpha-timeout" type="number" min="10" step="1" value="90"></label>
+          </div>
+          <div id="alpha-mode-note" class="note">CEX Alpha 模式</div>
         </section>
       </div>
 

@@ -3675,7 +3675,7 @@
         const boostStatus = document.getElementById('boost-auto-status');
 
         return {
-            version: '1.1.14',
+            version: '1.2.0',
             ready: Boolean(calculatorPanelEl),
             legacyUserscriptDetected: hasVisibleLegacyUserscriptPanel(),
             url: window.location.href,

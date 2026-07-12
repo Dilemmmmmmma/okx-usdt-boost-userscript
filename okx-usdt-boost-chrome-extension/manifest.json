@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Boost & Alpha 交易助手",
-  "version": "1.1.14",
-  "description": "OKX Boost 与 Binance Alpha 的侧边栏交易工作台。",
+  "version": "1.2.0",
+  "description": "OKX Boost 与 Binance CEX、Wallet Alpha 的侧边栏交易工作台。",
   "icons": {
     "16": "icons/boost-alpha-16.png",
     "32": "icons/boost-alpha-32.png",
@@ -19,7 +19,8 @@
   "host_permissions": [
     "https://web3.okx.com/*",
     "https://web3.cnouxyex.co/*",
-    "https://www.binance.com/*"
+    "https://www.binance.com/*",
+    "https://web3.binance.com/*"
   ],
   "action": {
     "default_title": "打开 Boost & Alpha 交易助手",
@@ -61,7 +62,7 @@
     },
     {
       "matches": [
-        "https://www.binance.com/zh-CN/alpha/*"
+        "https://www.binance.com/*/alpha/*"
       ],
       "js": [
         "alpha-page-engine.js"
@@ -71,10 +72,29 @@
     },
     {
       "matches": [
-        "https://www.binance.com/zh-CN/alpha/*"
+        "https://www.binance.com/*/alpha/*"
       ],
       "js": [
         "alpha-content-bridge.js"
+      ],
+      "run_at": "document_start"
+    },
+    {
+      "matches": [
+        "https://web3.binance.com/*/token/*/*"
+      ],
+      "js": [
+        "wallet-alpha-page-engine.js"
+      ],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "matches": [
+        "https://web3.binance.com/*/token/*/*"
+      ],
+      "js": [
+        "wallet-alpha-content-bridge.js"
       ],
       "run_at": "document_start"
     }
