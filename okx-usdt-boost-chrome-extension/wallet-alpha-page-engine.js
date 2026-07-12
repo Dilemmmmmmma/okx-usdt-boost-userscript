@@ -4,7 +4,7 @@
   if (window.__WALLET_ALPHA_EXTENSION_ENGINE__) return;
   window.__WALLET_ALPHA_EXTENSION_ENGINE__ = true;
 
-  const VERSION = '1.2.0';
+  const VERSION = '1.2.1';
   const CHANNEL_KEY = '__walletAlphaExtension';
   const TAG_API = '/bapi/defi/v1/public/wallet-direct/buw/wallet/dex/market/token/tag/info';
   const META_API = '/bapi/defi/v1/public/wallet-direct/buw/wallet/dex/market/token/meta/info';
@@ -279,12 +279,19 @@
     const exactLabels = side === 'sell'
       ? [`Shortcut ${normalized}`, `快捷 ${normalized}`, `${normalized}%`]
       : [`Shortcut ${normalized}`, `快捷 ${normalized}`];
-    const candidates = visibleElements('[role="button"], button').filter((element) => {
+    const visibleButtons = visibleElements('[role="button"], button');
+    const ariaCandidates = visibleButtons.filter((element) => {
       const aria = String(element.getAttribute('aria-label') || '').trim();
-      const text = String(element.textContent || '').replace(/\s+/g, ' ').trim();
-      return exactLabels.includes(aria) || exactLabels.includes(text) || (side === 'sell' && text === `${normalized}%`) || (side === 'buy' && text === normalized);
+      return exactLabels.includes(aria);
     });
-    return candidates.length === 1 ? candidates[0] : null;
+    if (ariaCandidates.length === 1) return ariaCandidates[0];
+    if (ariaCandidates.length > 1) return null;
+
+    const textCandidates = visibleButtons.filter((element) => {
+      const text = String(element.textContent || '').replace(/\s+/g, ' ').trim();
+      return exactLabels.includes(text) || (side === 'sell' && text === `${normalized}%`) || (side === 'buy' && text === normalized);
+    });
+    return textCandidates.length === 1 ? textCandidates[0] : null;
   }
 
   async function ensureTradePanel() {
