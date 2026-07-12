@@ -1,18 +1,3 @@
-// ==UserScript==
-// @name         OKX Web3 DEX USDT 盈亏计算器 (含 Boost 计算、自动刷新与自动交易) 极简版
-// @namespace    http://tampermonkey.net/
-// @version      6.69_DefaultKlineCalculator
-// @description  使用订单接口统计 USDT 总交易额与净差，默认在K线区域打开USDT计算器，支持定时启动自动交易，并使用官方 Boost records 实时同步总 Boost 交易额与进度
-// @author       Dilemmmmmmma
-// @match        *://web3.okx.com/*
-// @match        *://web3.cnouxyex.co/*
-// @homepageURL  https://github.com/Dilemmmmmmma/okx-usdt-boost-userscript
-// @supportURL   https://github.com/Dilemmmmmmma/okx-usdt-boost-userscript/issues
-// @updateURL    https://raw.githubusercontent.com/Dilemmmmmmma/okx-usdt-boost-userscript/main/OKX-USDT-Boost.user.js
-// @downloadURL  https://raw.githubusercontent.com/Dilemmmmmmma/okx-usdt-boost-userscript/main/OKX-USDT-Boost.user.js
-// @grant        none
-// ==/UserScript==
-
 (function() {
     'use strict';
 
@@ -3675,7 +3660,7 @@
         const boostStatus = document.getElementById('boost-auto-status');
 
         return {
-            version: '1.2.7',
+            version: '1.2.8',
             ready: Boolean(calculatorPanelEl),
             legacyUserscriptDetected: hasVisibleLegacyUserscriptPanel(),
             url: window.location.href,

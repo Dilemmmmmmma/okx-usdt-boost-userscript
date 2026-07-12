@@ -1,8 +1,9 @@
 {
   "manifest_version": 3,
   "name": "Boost & Alpha 交易助手",
-  "version": "1.2.7",
+  "version": "1.2.8",
   "description": "OKX Boost 与 Binance CEX、Wallet Alpha 的侧边栏交易工作台。",
+  "homepage_url": "https://github.com/Dilemmmmmmma/okx-usdt-boost-userscript",
   "icons": {
     "16": "icons/boost-alpha-16.png",
     "32": "icons/boost-alpha-32.png",
@@ -11,10 +12,8 @@
   },
   "minimum_chrome_version": "114",
   "permissions": [
-    "activeTab",
     "sidePanel",
-    "scripting",
-    "tabs"
+    "scripting"
   ],
   "host_permissions": [
     "https://web3.okx.com/*",

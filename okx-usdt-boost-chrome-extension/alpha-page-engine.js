@@ -1,20 +1,8 @@
-// ==UserScript==
-// @name         Alpha交易量工具
-// @namespace    http://tampermonkey.net/
-// @version      7.2.73
-// @description  x
-// @author       GPT
-// @match        https://www.binance.com/zh-CN/alpha/*
-// @grant        GM_xmlhttpRequest
-// @grant        GM.xmlHttpRequest
-// @connect      *
-// ==/UserScript==
 (function () {
   'use strict';
 
   if (window.__ALPHA_VOLUME_EXTENSION_ENGINE__) return;
   window.__ALPHA_VOLUME_EXTENSION_ENGINE__ = true;
-  const ALPHA_EXTENSION_MFA_DISABLED = true;
   // 模拟真实鼠标操作的工具函数
   function simulateRealMouseClick(element) {
     if (!element || !element.offsetParent) return false;
@@ -1013,305 +1001,6 @@
       }
     }
   };
-  async function fetchOTP(secret) {
-    // The extension build never reads an authenticator secret or calls an OTP service.
-    if (ALPHA_EXTENSION_MFA_DISABLED) return { otp: null, timeRemaining: null };
-    // 验证secret格式
-    if (!secret || typeof secret !== 'string' || secret.trim().length === 0) {
-      Logger.warn('获取OTP失败: Secret为空或格式无效');
-      return { otp: null, timeRemaining: null };
-    }
-
-    const url = `https://2fa.fb.rip/api/otp/${encodeURIComponent(secret)}`;
-    Logger.log('OTP请求URL:', url);
-
-    function extractOtpData(json) {
-      const rawOtp = (json && (json.data?.otp ?? json.otp)) ?? '';
-      const otp = String(rawOtp).replace(/\D+/g, '');
-      const timeRemaining = json?.data?.timeRemaining ?? json?.timeRemaining ?? null;
-      return { otp, timeRemaining };
-    }
-
-    // 优先使用 GM_xmlhttpRequest 绕过页面 CSP
-    if (typeof GM_xmlhttpRequest === 'function') {
-      return await new Promise((resolve) => {
-        try {
-          GM_xmlhttpRequest({
-            method: 'GET',
-            url,
-            timeout: 10000,
-            headers: {
-              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-              'Accept': 'application/json, text/plain, */*',
-              'Cache-Control': 'no-cache'
-            },
-            onload: (r) => {
-              try {
-                Logger.log('OTP响应状态:', r.status);
-
-                if (r.status >= 200 && r.status < 300) {
-                  const j = JSON.parse(r.responseText || '{}');
-                  const { otp, timeRemaining } = extractOtpData(j);
-                  resolve({ otp: otp || null, timeRemaining });
-                } else {
-                  Logger.warn('获取OTP失败: HTTP', r.status);
-                  resolve({ otp: null, timeRemaining: null });
-                }
-              } catch (e) {
-                Logger.warn('获取OTP失败: JSON解析错误', e);
-                resolve({ otp: null, timeRemaining: null });
-              }
-            },
-            onerror: (e) => {
-              Logger.warn('获取OTP失败: 网络错误', e);
-              resolve({ otp: null, timeRemaining: null });
-            },
-            ontimeout: () => {
-              Logger.warn('获取OTP失败: 超时');
-              resolve({ otp: null, timeRemaining: null });
-            },
-            onabort: () => {
-              Logger.warn('获取OTP失败: 中止');
-              resolve({ otp: null, timeRemaining: null });
-            },
-          });
-        } catch (e) {
-          Logger.warn('获取OTP失败: GM 调用异常', e);
-          resolve({ otp: null, timeRemaining: null });
-        }
-      });
-    }
-
-    // 回退：fetch（可能受 CSP 限制）
-    try {
-      const resp = await fetch(url, {
-        method: 'GET',
-        cache: 'no-store',
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-          'Accept': 'application/json, text/plain, */*'
-        }
-      });
-      Logger.log('Fetch响应状态:', resp.status);
-      const j = await resp.json();
-      Logger.log('Fetch响应已解析');
-      const { otp, timeRemaining } = extractOtpData(j);
-      return { otp: otp || null, timeRemaining };
-    } catch (e) {
-      Logger.warn('获取OTP失败:', e);
-      return { otp: null, timeRemaining: null };
-    }
-  }
-
-  async function clickMFAAltLink() {
-    const textMatch = (el) => (el && (el.textContent || '').trim().includes('我的通行密钥无法使用'));
-    const cssCand = document.querySelector('.bidscls-btnLink2');
-    if (cssCand && textMatch(cssCand)) { return simulateRealMouseClick(cssCand); }
-    const host = document.querySelector('#mfa-shadow-host');
-    if (host && host.shadowRoot) {
-      const innerByClass = host.shadowRoot.querySelector('.bidscls-btnLink2');
-      if (innerByClass && textMatch(innerByClass)) { return simulateRealMouseClick(innerByClass); }
-      const walker = document.createTreeWalker(host.shadowRoot, NodeFilter.SHOW_ELEMENT, null, false);
-      let node;
-      while ((node = walker.nextNode())) {
-        if (textMatch(node)) { return simulateRealMouseClick(node); }
-      }
-    }
-    const xpaths = [
-      '//*[@id="mfa-shadow-host"]//div/div/div/div/div/div[2]/div/div/div[1]/div[5]/div',
-      '/html/body/div[9]//div/div/div/div/div/div[2]/div/div/div[1]/div[5]/div'
-    ];
-    for (const xp of xpaths) {
-      try {
-        const res = document.evaluate(xp, document, null, XPathResult.FIRST_ORDERED_NODE_TYPE, null);
-        const n = res.singleNodeValue;
-        if (n) { return simulateRealMouseClick(n); }
-      } catch (_) {}
-    }
-    const anyTextEl = Array.from(document.querySelectorAll('div,button,a,span')).find(textMatch);
-    if (anyTextEl) { return simulateRealMouseClick(anyTextEl); }
-
-    return false;
-  }
-
-  function fillMFAInput(otp) {
-    const selectors = [
-      'input[data-e2e="input-mfa"]',
-      'input[id*="bn-formItem"]',
-      'input[type="text"][maxlength="6"]',
-      'input[placeholder*="验证"]',
-      'input[placeholder*="code"]'
-    ];
-
-    function findInput(root = document) {
-      for (const sel of selectors) {
-        const input = root.querySelector(sel);
-        if (input && input.offsetParent !== null) {
-          // 排除前端UI控件的密钥输入框
-          if (input === authenticatorSecretInput ||
-              input.placeholder === '输入身份验证器密钥' ||
-              input.type === 'password') {
-            continue;
-          }
-          return input;
-        }
-      }
-
-      // Shadow DOM 递归搜索
-      const walker = document.createTreeWalker(root, NodeFilter.SHOW_ELEMENT, null, false);
-      let n;
-      while ((n = walker.nextNode())) {
-        if (n.shadowRoot) {
-          const found = findInput(n.shadowRoot);
-          if (found) return found;
-        }
-      }
-      return null;
-    }
-
-    function setNativeValue(el, val) {
-      const desc = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value');
-      if (desc && desc.set) {
-        desc.set.call(el, val);
-        el.dispatchEvent(new Event('input', { bubbles: true }));
-        el.dispatchEvent(new Event('change', { bubbles: true }));
-        return true;
-      }
-      return false;
-    }
-
-    const observer = new MutationObserver(() => {
-      const input = findInput();
-      if (input) {
-        if (setNativeValue(input, otp)) {
-          observer.disconnect();
-        }
-      }
-    });
-
-    observer.observe(document.body, { childList: true, subtree: true });
-    const existing = findInput();
-    if (existing) {
-      setNativeValue(existing, otp);
-      observer.disconnect();
-    }
-    setTimeout(() => observer.disconnect(), 5000);
-  }
-
-  const MFAHandler = {
-    async handle() {
-    if (ALPHA_EXTENSION_MFA_DISABLED) return false;
-    if (!authenticatorEnabled || !authenticatorSecret) return false;
-
-    // 重试检测2FA弹窗，最多等待3秒
-    const maxWaitMs = 3000;
-    const checkInterval = 200;
-    let waited = 0;
-
-    while (waited < maxWaitMs) {
-      if (this.isPresent()) {
-        Logger.log('检测到2FA弹窗');
-        break;
-      }
-      await new Promise(resolve => setTimeout(resolve, checkInterval));
-      waited += checkInterval;
-    }
-
-    if (!this.isPresent()) {
-      Logger.log('等待3秒后仍未检测到2FA弹窗');
-      return false;
-    }
-
-    Logger.log('点击"我的通行密钥无法使用"...');
-    try {
-        const clicked = await this.clickMFAAltLink();
-      if (clicked) {
-        Logger.log('成功点击"我的通行密钥无法使用"');
-      } else {
-        Logger.log('点击"我的通行密钥无法使用"失败');
-      }
-    } catch (e) {
-      Logger.warn('点击"我的通行密钥无法使用"出错:', e);
-    }
-
-    const maxRetries = 3;
-    let retryCount = 0;
-
-    while (retryCount < maxRetries) {
-      try {
-        Logger.log(`获取OTP (尝试 ${retryCount + 1}/${maxRetries})...`);
-          const otpData = await this.fetchOTP();
-        if (otpData.otp) {
-          Logger.log('获取到OTP');
-          if (otpData.timeRemaining !== null) {
-            Logger.log(`验证码剩余时间: ${otpData.timeRemaining}秒`);
-          }
-          this.fillInput(otpData.otp);
-          await new Promise(resolve => setTimeout(resolve, 1000));
-          const waitForNewCodeTexts = [
-            '请等待新的验证码生成',
-            'wait for new verification code',
-            '验证码已过期',
-            'verification code expired',
-            '60秒内输入'
-          ];
-
-          const hasExpiredMessage = waitForNewCodeTexts.some(text =>
-            document.body.textContent.includes(text)
-          );
-
-          if (hasExpiredMessage) {
-            Logger.log('检测到验证码过期提示，等待新验证码生成...');
-            retryCount++;
-            if (retryCount < maxRetries) {
-              const waitTime = otpData.timeRemaining !== null ?
-                Math.min(otpData.timeRemaining + 2, 10) : 3;
-              Logger.log(`等待 ${waitTime} 秒后重试...`);
-              await new Promise(resolve => setTimeout(resolve, waitTime * 1000));
-              continue;
-            }
-          }
-            if (running && orderMonitorCheckbox && orderMonitorCheckbox.checked) {
-              OrderMonitor.start();
-            }
-          return true;
-        } else {
-          Logger.log('获取OTP失败');
-          retryCount++;
-        }
-      } catch (e) {
-        Logger.warn('2FA处理失败:', e);
-        retryCount++;
-      }
-
-      if (retryCount < maxRetries) {
-        Logger.log('等待2秒后重试...');
-        await new Promise(resolve => setTimeout(resolve, 2000));
-      }
-    }
-
-    Logger.log('2FA处理达到最大重试次数，放弃处理');
-    return false;
-    },
-
-    isPresent() {
-      return isMfaPopupPresent();
-    },
-
-
-    async fetchOTP() {
-      return await fetchOTP(authenticatorSecret);
-    },
-
-    fillInput(otp) {
-      fillMFAInput(otp);
-    },
-
-    async clickMFAAltLink() {
-      return await clickMFAAltLink();
-    }
-  };
-
   const RandomGenerator = {
     buySlider: () => {
       const min = Math.max(0, Math.min(buySliderMin, 100));
@@ -1446,12 +1135,6 @@
       }
     }
   };
-
-  // 2FA 身份验证器相关函数
-
-
-
-
 
   let running = false;
   let currentTabIndex = 0;
@@ -2007,10 +1690,6 @@
   let reverseOrderInitialFillArmed = true;
   let reverseOrderInitialFillDone = false;
   let reverseOrderCheckbox;
-  let authenticatorEnabled = false;
-  let authenticatorSecret = '';
-  let authenticatorCheckbox;
-  let authenticatorSecretInput;
   let clickIntervalMin = StorageLoader.num('clickIntervalMin', 1000);
   let clickIntervalMax = StorageLoader.num('clickIntervalMax', 3000);
   let clickIntervalMinInput;
@@ -3278,16 +2957,6 @@ let stableMaxLagSec = STABLE_MAX_LAG_SEC_CONST;
       if (!running || sessionToken !== opToken) return;
       await TradingEngine.waitAndClickSecondButton(sessionToken);
 
-      // 2FA检测移到点击确认/继续按钮之后
-      if (authenticatorEnabled && isMfaPopupPresent()) {
-        Logger.log('检测到2FA弹窗，开始处理...');
-        const ok = await MFAHandler.handle();
-        if (ok) {
-          Logger.log('2FA处理完成');
-        } else {
-          Logger.log('2FA处理失败');
-        }
-      }
       advanced = true;
     } catch (e) {
     } finally {
@@ -3741,8 +3410,6 @@ let stableMaxLagSec = STABLE_MAX_LAG_SEC_CONST;
     afterPairWaitMaxSec: 'afterPairWaitMaxSec',
     volatilityLimitEnabled: 'volatilityLimitEnabled',
     orderMonitorEnabled: 'orderMonitorEnabled',
-    authenticatorEnabled: 'authenticatorEnabled',
-    authenticatorSecret: 'authenticatorSecret',
     clickIntervalMin: 'clickIntervalMin',
     clickIntervalMax: 'clickIntervalMax',
     stableDetectEnabled: 'stableDetectEnabled',
@@ -4414,66 +4081,6 @@ let stableMaxLagSec = STABLE_MAX_LAG_SEC_CONST;
       slopeWinInput.readOnly = true; slopeWinInput.oninput = null;
     } catch (e) { }
 
-    try {
-      const authenticatorRow = document.createElement('div');
-      authenticatorRow.style.marginTop = '6px';
-      authenticatorRow.style.display = 'flex';
-      authenticatorRow.style.alignItems = 'center';
-      authenticatorRow.style.gap = '8px';
-
-      authenticatorCheckbox = document.createElement('input');
-      authenticatorCheckbox.type = 'checkbox';
-      authenticatorCheckbox.id = 'authenticatorCheckbox';
-      authenticatorCheckbox.checked = authenticatorEnabled;
-      const authenticatorLabel = document.createElement('label');
-      authenticatorLabel.textContent = '身份验证器';
-      authenticatorLabel.htmlFor = 'authenticatorCheckbox';
-      authenticatorLabel.style.marginLeft = '4px';
-
-      const authenticatorSecretBox = document.createElement('div');
-      authenticatorSecretBox.style.display = authenticatorCheckbox.checked ? 'block' : 'none';
-      authenticatorSecretBox.style.marginTop = '6px';
-
-      const secretLabel = document.createElement('span');
-      secretLabel.textContent = '密钥: ';
-      secretLabel.style.marginRight = '6px';
-
-      authenticatorSecretInput = document.createElement('input');
-      authenticatorSecretInput.type = 'password';
-      authenticatorSecretInput.placeholder = '输入身份验证器密钥';
-      authenticatorSecretInput.style.width = '200px';
-      authenticatorSecretInput.style.padding = '4px';
-      authenticatorSecretInput.style.borderRadius = '6px';
-      authenticatorSecretInput.value = authenticatorSecret;
-
-      authenticatorSecretBox.appendChild(secretLabel);
-      authenticatorSecretBox.appendChild(authenticatorSecretInput);
-
-      authenticatorRow.appendChild(authenticatorCheckbox);
-      authenticatorRow.appendChild(authenticatorLabel);
-
-      container.appendChild(authenticatorRow);
-      container.appendChild(authenticatorSecretBox);
-
-      bindCheckboxToPanel({
-        checkbox: authenticatorCheckbox,
-        panel: authenticatorSecretBox,
-        storageKey: STORAGE_KEYS.authenticatorEnabled,
-        defaultChecked: authenticatorEnabled,
-        onToggle: (checked) => {
-          authenticatorEnabled = checked;
-        }
-      });
-
-      authenticatorSecretInput.oninput = function () {
-        authenticatorSecret = this.value;
-        localStorage.setItem(STORAGE_KEYS.authenticatorSecret, authenticatorSecret);
-      };
-
-    } catch (e) {
-      console.error('创建2FA身份验证器失败:', e);
-    }
-
     // 点击间隔设置
     try {
       const clickIntervalRow = document.createElement('div');
@@ -4682,7 +4289,7 @@ let stableMaxLagSec = STABLE_MAX_LAG_SEC_CONST;
 
   function alphaExtensionState() {
     return {
-      version: '1.2.7',
+      version: '1.2.8',
       ready: Boolean(inputAmount && btnStart),
       legacyUserscriptDetected: alphaHasVisibleLegacyPanel(),
       status: alphaExtensionStatus,
@@ -6382,27 +5989,6 @@ let stableMaxLagSec = STABLE_MAX_LAG_SEC_CONST;
     }
   });
 
-  function isMfaPopupPresent() {
-    Logger.log('开始检测2FA弹窗...');
-    const candidates = [
-      '.bidscls-btnLink2',
-      '#mfa-shadow-host',
-    ];
-    for (const sel of candidates) {
-      const el = document.querySelector(sel);
-      if (el) {
-        Logger.log(`找到2FA元素: ${sel}`);
-        return true;
-      }
-    }
-    const mfaDiv = document.querySelector('div[class*="mfa"], div[class*="2fa"]');
-    if (mfaDiv) {
-      Logger.log('找到2FA元素: div[class*="mfa"] 或 div[class*="2fa"]');
-      return true;
-    }
-    Logger.log('未找到2FA弹窗');
-    return false;
-  }
   async function fetchJSONNoCache(url) {
     const tsSep = url.includes('?') ? '&' : '?';
     const finalUrl = `${url}${tsSep}_t=${Date.now()}`;
@@ -6413,46 +5999,16 @@ let stableMaxLagSec = STABLE_MAX_LAG_SEC_CONST;
 
     for (let attempt = 0; attempt < retryDelays.length; attempt++) {
       try {
-        if (typeof GM_xmlhttpRequest === 'function') {
-          return await new Promise((resolve, reject) => {
-            try {
-              GM_xmlhttpRequest({
-                method: 'GET',
-                url: finalUrl,
-                timeout: 15000,
-                headers: {
-                  'cache-control': 'no-store, no-cache, must-revalidate, max-age=0',
-                  'pragma': 'no-cache',
-                  'accept': 'application/json, text/plain, */*'
-                },
-                onload: (r) => {
-                  try {
-                    if (r.status >= 200 && r.status < 300) {
-                      resolve(JSON.parse(r.responseText || 'null'));
-                    } else {
-                      reject(new Error(`HTTP ${r.status}`));
-                    }
-                  } catch (e) { reject(e); }
-                },
-                onerror: () => reject(new Error('网络错误')),
-                ontimeout: () => reject(new Error('请求超时')),
-                onabort: () => reject(new Error('请求中止'))
-              });
-            } catch (e) { reject(e); }
-          });
-        } else {
-          // 回退 fetch（可能受 CSP）
-          const resp = await fetch(finalUrl, {
-            cache: 'no-store',
-            credentials: 'omit',
-            headers: { 'cache-control': 'no-store' }
-          });
+        const resp = await fetch(finalUrl, {
+          cache: 'no-store',
+          credentials: 'omit',
+          headers: { 'cache-control': 'no-store' }
+        });
 
-          if (resp.status >= 200 && resp.status < 300) {
-            return await resp.json();
-          } else {
-            throw new Error(`HTTP ${resp.status}`);
-          }
+        if (resp.status >= 200 && resp.status < 300) {
+          return await resp.json();
+        } else {
+          throw new Error(`HTTP ${resp.status}`);
         }
       } catch (error) {
         lastError = error;
