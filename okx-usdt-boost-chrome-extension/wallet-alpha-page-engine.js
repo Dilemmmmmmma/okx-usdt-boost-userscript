@@ -4,7 +4,7 @@
   if (window.__WALLET_ALPHA_EXTENSION_ENGINE__) return;
   window.__WALLET_ALPHA_EXTENSION_ENGINE__ = true;
 
-  const VERSION = '1.2.1';
+  const VERSION = '1.2.2';
   const CHANNEL_KEY = '__walletAlphaExtension';
   const TAG_API = '/bapi/defi/v1/public/wallet-direct/buw/wallet/dex/market/token/tag/info';
   const META_API = '/bapi/defi/v1/public/wallet-direct/buw/wallet/dex/market/token/meta/info';
@@ -14,6 +14,7 @@
   const FAILURE_RE = /失败|已取消|已拒绝|已过期|failed|cancelled|canceled|rejected|expired/i;
   const BUY_RE = /买入|\bbuy\b/i;
   const SELL_RE = /卖出|\bsell\b/i;
+  const INSUFFICIENT_USDT_RE = /(?:BSC\s*上的\s*)?USDT\s*余额不足|insufficient\s+USDT\s+balance/i;
 
   let settings = loadSettings();
   let token = readTokenFromUrl();
@@ -27,10 +28,38 @@
   let loopToken = 0;
   let visibleDialogBaseline = new Set();
   let progress = loadProgress();
+  let lastInsufficientUsdtNotice = { sequence: 0, text: '' };
 
   function sleep(ms) {
     return new Promise((resolve) => window.setTimeout(resolve, ms));
   }
+
+  function recordInsufficientUsdtNotice(value) {
+    const text = String(value || '').replace(/\s+/g, ' ').trim();
+    if (!INSUFFICIENT_USDT_RE.test(text)) return;
+    lastInsufficientUsdtNotice = {
+      sequence: lastInsufficientUsdtNotice.sequence + 1,
+      text: text.slice(0, 160)
+    };
+  }
+
+  function observeTradeNotices() {
+    const root = document.documentElement || document;
+    const observer = new MutationObserver((mutations) => {
+      for (const mutation of mutations) {
+        if (mutation.type === 'characterData') {
+          recordInsufficientUsdtNotice(mutation.target.nodeValue);
+          continue;
+        }
+        for (const node of mutation.addedNodes) {
+          recordInsufficientUsdtNotice(node.nodeType === Node.TEXT_NODE ? node.nodeValue : node.textContent);
+        }
+      }
+    });
+    observer.observe(root, { childList: true, characterData: true, subtree: true });
+  }
+
+  observeTradeNotices();
 
   function isVisible(element) {
     if (!(element instanceof Element)) return false;
@@ -447,10 +476,17 @@
     return current && tokenKey(current) === expectedKey;
   }
 
-  async function waitForNewOrder(side, beforeIds, expectedTokenKey, timeoutMs) {
+  function insufficientUsdtError() {
+    const error = new Error(lastInsufficientUsdtNotice.text || 'BSC 上的 USDT 余额不足');
+    error.code = 'INSUFFICIENT_USDT';
+    return error;
+  }
+
+  async function waitForNewOrder(side, beforeIds, expectedTokenKey, timeoutMs, noticeBaseline = Infinity) {
     const deadline = Date.now() + timeoutMs;
     while (Date.now() < deadline) {
       if (!tokenUnchanged(expectedTokenKey)) throw new Error('页面代币已改变，交易已暂停');
+      if (side === 'buy' && lastInsufficientUsdtNotice.sequence > noticeBaseline) throw insufficientUsdtError();
       const unexpectedDialog = newDialogDetected();
       if (unexpectedDialog) throw new Error('检测到新的确认或风险弹窗，请手动处理后重新启动');
       const rows = orderRows().filter((row) => !beforeIds.has(row.id));
@@ -467,6 +503,24 @@
       await sleep(250);
     }
     throw new Error(`${side === 'buy' ? '买入' : '卖出'}订单等待超时，未自动重试`);
+  }
+
+  async function executeSell100(sessionToken, expectedTokenKey, preparingStatus = '准备卖出 100%') {
+    phase = 'preparing-sell';
+    status = preparingStatus;
+    postState();
+    await selectTab('SELL', '卖出');
+    const beforeSell = await settledOrderIds();
+    const sellShortcut = findShortcut(100, 'sell');
+    if (!sellShortcut) throw new Error('卖出 100% 按钮未找到或不唯一');
+    if (!running || sessionToken !== loopToken) return false;
+    if (!tokenUnchanged(expectedTokenKey)) throw new Error('页面代币已改变，交易已暂停');
+    clickElement(sellShortcut);
+    phase = 'waiting-sell';
+    status = '等待卖出订单确认';
+    postState();
+    await waitForNewOrder('sell', beforeSell, expectedTokenKey, settings.orderTimeoutSec * 1000);
+    return true;
   }
 
   function pauseWithError(error) {
@@ -502,12 +556,25 @@
         if (!buyShortcut) throw new Error(`买入快捷值 ${normalizeShortcut(settings.shortcutAmount)} 未找到或不唯一`);
         if (!running || sessionToken !== loopToken || stopRequested) break;
         if (!tokenUnchanged(expectedTokenKey)) throw new Error('页面代币已改变，交易已暂停');
+        const buyNoticeBaseline = lastInsufficientUsdtNotice.sequence;
         clickElement(buyShortcut);
         phase = 'waiting-buy';
         status = '等待买入订单确认';
         postState();
 
-        const buyOrder = await waitForNewOrder('buy', beforeBuy, expectedTokenKey, settings.orderTimeoutSec * 1000);
+        let buyOrder;
+        try {
+          buyOrder = await waitForNewOrder('buy', beforeBuy, expectedTokenKey, settings.orderTimeoutSec * 1000, buyNoticeBaseline);
+        } catch (error) {
+          if (error?.code !== 'INSUFFICIENT_USDT') throw error;
+          const recovered = await executeSell100(sessionToken, expectedTokenKey, 'USDT 余额不足，先卖出 100%');
+          if (!recovered || stopRequested) break;
+          phase = 'idle';
+          status = '卖出成功，重新准备买入';
+          postState();
+          await sleep(1000);
+          continue;
+        }
         const buyUsdAvailable = Number.isFinite(buyOrder.usd) && buyOrder.usd > 0;
         if (buyUsdAvailable) {
           progress.actualBuyUsd += buyOrder.usd;
@@ -516,20 +583,8 @@
           postState();
         }
 
-        phase = 'preparing-sell';
-        status = '买入成功，准备卖出 100%';
-        postState();
-        await selectTab('SELL', '卖出');
-        const beforeSell = await settledOrderIds();
-        const sellShortcut = findShortcut(100, 'sell');
-        if (!sellShortcut) throw new Error('卖出 100% 按钮未找到或不唯一');
-        if (!running || sessionToken !== loopToken) break;
-        if (!tokenUnchanged(expectedTokenKey)) throw new Error('页面代币已改变，交易已暂停');
-        clickElement(sellShortcut);
-        phase = 'waiting-sell';
-        status = '等待卖出订单确认';
-        postState();
-        await waitForNewOrder('sell', beforeSell, expectedTokenKey, settings.orderTimeoutSec * 1000);
+        const sold = await executeSell100(sessionToken, expectedTokenKey, '买入成功，准备卖出 100%');
+        if (!sold) break;
 
         progress.rounds += 1;
         saveProgress();
