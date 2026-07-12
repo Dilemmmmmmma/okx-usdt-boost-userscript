@@ -4,7 +4,7 @@
   if (window.__WALLET_ALPHA_EXTENSION_ENGINE__) return;
   window.__WALLET_ALPHA_EXTENSION_ENGINE__ = true;
 
-  const VERSION = '1.2.4';
+  const VERSION = '1.2.5';
   const CHANNEL_KEY = '__walletAlphaExtension';
   const TAG_API = '/bapi/defi/v1/public/wallet-direct/buw/wallet/dex/market/token/tag/info';
   const META_API = '/bapi/defi/v1/public/wallet-direct/buw/wallet/dex/market/token/meta/info';
@@ -289,24 +289,61 @@
     return Array.from(root.querySelectorAll(selector)).filter(isVisible);
   }
 
+  function elementsWithin(root, selector) {
+    if (!root?.querySelectorAll) return [];
+    return Array.from(root.querySelectorAll(selector));
+  }
+
   function shortcutSide(element) {
     const text = String(element?.textContent || '').replace(/\s+/g, '').trim();
     return text.endsWith('%') ? 'sell' : 'buy';
   }
 
+  function hasBothShortcutSides(root, visibleOnly = false) {
+    const selector = '[aria-label^="Shortcut "], [aria-label^="快捷 "]';
+    const shortcuts = visibleOnly ? visibleElementsWithin(root, selector) : elementsWithin(root, selector);
+    return shortcuts.some((element) => shortcutSide(element) === 'buy')
+      && shortcuts.some((element) => shortcutSide(element) === 'sell');
+  }
+
   function findOneClickPanelRoot() {
-    const shortcuts = visibleElements('[aria-label^="Shortcut "], [aria-label^="快捷 "]');
+    const anchoredPanels = elementsWithin(document, '[tabindex="-1"]').filter((element) => {
+      return element.querySelector('[aria-label="P1"]')
+        && element.querySelector('[aria-label="P2"]')
+        && element.querySelector('[aria-label="P3"]')
+        && hasBothShortcutSides(element);
+    });
+    const visibleAnchoredPanels = anchoredPanels.filter(isVisible);
+    if (visibleAnchoredPanels.length === 1) return visibleAnchoredPanels[0];
+    if (anchoredPanels.length === 1) return anchoredPanels[0];
+
+    const shortcuts = elementsWithin(document, '[aria-label^="Shortcut "], [aria-label^="快捷 "]');
     for (const shortcut of shortcuts) {
       let ancestor = shortcut.parentElement;
       while (ancestor && ancestor !== document.body) {
-        const scopedShortcuts = visibleElementsWithin(ancestor, '[aria-label^="Shortcut "], [aria-label^="快捷 "]');
-        const hasBuyShortcuts = scopedShortcuts.some((element) => shortcutSide(element) === 'buy');
-        const hasSellShortcuts = scopedShortcuts.some((element) => shortcutSide(element) === 'sell');
-        if (hasBuyShortcuts && hasSellShortcuts) return ancestor;
+        if (hasBothShortcutSides(ancestor)) return ancestor;
         ancestor = ancestor.parentElement;
       }
     }
     return null;
+  }
+
+  function oneClickToggleIsActive(button) {
+    if (!button) return false;
+    return elementsWithin(button, '[class]').some((element) => element.classList.contains('text-[--color-Buy]'));
+  }
+
+  function findOneClickToggle() {
+    const exact = visibleElements('button[aria-label="一键买卖"], button[aria-label="One-click Buy/Sell"]');
+    if (exact.length === 1) return exact[0];
+    const active = exact.filter(oneClickToggleIsActive);
+    return active.length === 1 ? active[0] : null;
+  }
+
+  function oneClickPanelIsReady() {
+    const toggle = findOneClickToggle();
+    const panelRoot = findOneClickPanelRoot();
+    return Boolean(toggle && oneClickToggleIsActive(toggle) && panelRoot && hasBothShortcutSides(panelRoot, true));
   }
 
   function findTab(key) {
@@ -316,7 +353,7 @@
 
   async function selectTab(key, label) {
     if (/^(BUY|SELL)$/.test(key)) {
-      if (!findOneClickPanelRoot()) throw new Error('一键买卖面板未打开');
+      if (!oneClickPanelIsReady()) throw new Error('一键买卖面板未打开');
       return;
     }
     const tab = findTab(key);
@@ -357,14 +394,25 @@
   }
 
   async function ensureTradePanel() {
-    if (findOneClickPanelRoot()) return true;
-    const buttons = visibleElements('button,[role="button"]').filter((element) => /一键买卖|one.?click/i.test(`${element.getAttribute('aria-label') || ''} ${element.textContent || ''}`));
-    if (buttons.length !== 1) throw new Error('一键买卖按钮未找到或不唯一');
-    status = '一键买卖面板未打开，正在打开';
+    let toggle = findOneClickToggle();
+    if (!toggle) throw new Error('一键买卖按钮未找到或不唯一');
+
+    if (!oneClickToggleIsActive(toggle)) {
+      status = '一键买卖面板未打开，正在打开';
+      postState();
+      clickElement(toggle);
+      toggle = await waitUntil(() => {
+        const current = findOneClickToggle();
+        return current && oneClickToggleIsActive(current) ? current : null;
+      }, 5000, 100);
+      if (!toggle) throw new Error('一键买卖按钮未切换到打开状态');
+    }
+
+    if (oneClickPanelIsReady()) return true;
+    status = '一键买卖面板已打开，等待快捷值加载';
     postState();
-    clickElement(buttons[0]);
-    const ready = await waitUntil(findOneClickPanelRoot, 5000, 100);
-    if (!ready) throw new Error('一键买卖面板未能打开');
+    const ready = await waitUntil(oneClickPanelIsReady, 5000, 100);
+    if (!ready) throw new Error('一键买卖面板已打开，但快捷值控件未加载');
     return true;
   }
 
