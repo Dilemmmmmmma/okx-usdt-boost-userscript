@@ -4,7 +4,7 @@
   if (window.__WALLET_ALPHA_EXTENSION_ENGINE__) return;
   window.__WALLET_ALPHA_EXTENSION_ENGINE__ = true;
 
-  const VERSION = '1.2.3';
+  const VERSION = '1.2.4';
   const CHANNEL_KEY = '__walletAlphaExtension';
   const TAG_API = '/bapi/defi/v1/public/wallet-direct/buw/wallet/dex/market/token/tag/info';
   const META_API = '/bapi/defi/v1/public/wallet-direct/buw/wallet/dex/market/token/meta/info';
@@ -289,14 +289,20 @@
     return Array.from(root.querySelectorAll(selector)).filter(isVisible);
   }
 
+  function shortcutSide(element) {
+    const text = String(element?.textContent || '').replace(/\s+/g, '').trim();
+    return text.endsWith('%') ? 'sell' : 'buy';
+  }
+
   function findOneClickPanelRoot() {
     const shortcuts = visibleElements('[aria-label^="Shortcut "], [aria-label^="快捷 "]');
     for (const shortcut of shortcuts) {
       let ancestor = shortcut.parentElement;
       while (ancestor && ancestor !== document.body) {
-        const hasBuyTab = visibleElementsWithin(ancestor, '[data-tab-key="BUY"]').length > 0;
-        const hasSellTab = visibleElementsWithin(ancestor, '[data-tab-key="SELL"]').length > 0;
-        if (hasBuyTab && hasSellTab) return ancestor;
+        const scopedShortcuts = visibleElementsWithin(ancestor, '[aria-label^="Shortcut "], [aria-label^="快捷 "]');
+        const hasBuyShortcuts = scopedShortcuts.some((element) => shortcutSide(element) === 'buy');
+        const hasSellShortcuts = scopedShortcuts.some((element) => shortcutSide(element) === 'sell');
+        if (hasBuyShortcuts && hasSellShortcuts) return ancestor;
         ancestor = ancestor.parentElement;
       }
     }
@@ -304,14 +310,15 @@
   }
 
   function findTab(key) {
-    const panelRoot = /^(BUY|SELL)$/.test(key) ? findOneClickPanelRoot() : null;
-    const matches = panelRoot
-      ? visibleElementsWithin(panelRoot, `[data-tab-key="${key}"]`)
-      : visibleElements(`[data-tab-key="${key}"]`);
+    const matches = visibleElements(`[data-tab-key="${key}"]`);
     return matches.length === 1 ? matches[0] : null;
   }
 
   async function selectTab(key, label) {
+    if (/^(BUY|SELL)$/.test(key)) {
+      if (!findOneClickPanelRoot()) throw new Error('一键买卖面板未打开');
+      return;
+    }
     const tab = findTab(key);
     if (!tab) throw new Error(`${label}按钮未找到或不唯一`);
     if (!String(tab.className || '').includes('active') && tab.getAttribute('aria-selected') !== 'true') {
@@ -334,14 +341,15 @@
     const visibleButtons = panelRoot
       ? visibleElementsWithin(panelRoot, '[role="button"], button')
       : visibleElements('[role="button"], button');
-    const ariaCandidates = visibleButtons.filter((element) => {
+    const sideButtons = visibleButtons.filter((element) => shortcutSide(element) === side);
+    const ariaCandidates = sideButtons.filter((element) => {
       const aria = String(element.getAttribute('aria-label') || '').trim();
       return exactLabels.includes(aria);
     });
     if (ariaCandidates.length === 1) return ariaCandidates[0];
     if (ariaCandidates.length > 1) return null;
 
-    const textCandidates = visibleButtons.filter((element) => {
+    const textCandidates = sideButtons.filter((element) => {
       const text = String(element.textContent || '').replace(/\s+/g, ' ').trim();
       return exactLabels.includes(text) || (side === 'sell' && text === `${normalized}%`) || (side === 'buy' && text === normalized);
     });
