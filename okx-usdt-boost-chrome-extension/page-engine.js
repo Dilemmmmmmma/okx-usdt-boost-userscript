@@ -88,6 +88,7 @@
     const AUTO_TRADE_RELOAD_DELAY_MS = 800;
     const AUTO_TRADE_RELOAD_RESUME_DELAY_MS = 2500;
     const MAX_AUTO_TRADE_RELOAD_RECOVERIES = 3;
+    const SLIPPAGE_TOO_LOW_RE = /滑点(?:设置)?过低|slippage(?:\s+tolerance)?(?:\s+is)?\s+too\s+low/i;
 
     let lastStats = {
         buy: 0,
@@ -3102,6 +3103,10 @@
     async function handleTradeInterruptions() {
         const bodyText = document.body ? document.body.innerText : '';
 
+        if (SLIPPAGE_TOO_LOW_RE.test(bodyText)) {
+            return 'slippage_too_low';
+        }
+
         if (bodyText.includes('第三方合约执行失败')) {
             const cancelButton = findElementByText('取消') || findElementByText('确定');
             if (cancelButton) triggerRealClick(cancelButton);
@@ -3127,6 +3132,20 @@
         return tradeNoticeInstanceIds.get(element);
     }
 
+    function hasVisibleSlippageWarning() {
+        const bodyText = document.body ? normalizeText(document.body.innerText) : '';
+        return SLIPPAGE_TOO_LOW_RE.test(bodyText);
+    }
+
+    async function waitForSlippageWarningToClear(timeoutMs = TRADE_STATUS_TIMEOUT_MS) {
+        const deadline = Date.now() + timeoutMs;
+        while (isAutoTrading && Date.now() < deadline) {
+            if (!hasVisibleSlippageWarning()) return true;
+            await sleep(200);
+        }
+        return !hasVisibleSlippageWarning();
+    }
+
     function getTradeStatusFlags() {
         const ownPanel = document.getElementById('okx-usdt-calculator');
         const notificationTitles = Array.from(document.querySelectorAll('.dex-notification-stack-title'));
@@ -3145,7 +3164,9 @@
                 const style = window.getComputedStyle(element);
                 const className = String(element.className || '').toLowerCase();
                 const isOfficialTitle = className.includes('dex-notification-stack-title');
+                const isSlippageWarning = SLIPPAGE_TOO_LOW_RE.test(text);
                 const toastLike = isOfficialTitle ||
+                    isSlippageWarning ||
                     style.position === 'fixed' ||
                     style.position === 'sticky' ||
                     rect.top < Math.max(220, window.innerHeight * 0.28) ||
@@ -3182,7 +3203,7 @@
             contractFailed: signature.includes('第三方合约执行失败'),
             zeroAmount: /数量不能为\s*0/.test(signature),
             insufficientBalance: /余额不足|insufficient\s+balance/i.test(signature),
-            slippageTooLow: /滑点(?:设置)?过低|slippage(?:\s+tolerance)?(?:\s+is)?\s+too\s+low/i.test(signature)
+            slippageTooLow: SLIPPAGE_TOO_LOW_RE.test(signature)
         };
     }
 
@@ -3197,10 +3218,14 @@
             if (interruption === 'contract_failed') {
                 return { ok: false, state: 'contract_failed', message: `${label}第三方合约执行失败，继续${label}` };
             }
+            if (interruption === 'slippage_too_low') {
+                return { ok: false, state: 'slippage_too_low', message: `${label}滑点设置过低，保持当前方向重试` };
+            }
 
             const flags = getTradeStatusFlags();
             const statusChanged = flags.signature !== beforeFlags.signature ||
-                flags.instanceSignature !== beforeFlags.instanceSignature;
+                flags.instanceSignature !== beforeFlags.instanceSignature ||
+                flags.slippageTooLow !== beforeFlags.slippageTooLow;
 
             if (!flags.text && beforeFlags.text) {
                 beforeFlags = {
@@ -3417,8 +3442,12 @@
         if (!success && lastTradeFailureState === 'slippage_too_low') {
             consecutiveTradeFailures = 0;
             autoTradeSide = sideToRun;
-            updateAutoTradeStatus(`${label}滑点设置过低，1 秒后继续${label}`, '#ff9800');
-            autoTradeTimerId = setTimeout(runAutoTradeLoop, TRADE_RETRY_COOLDOWN_MS);
+            updateAutoTradeStatus(`${label}滑点设置过低，等待提示消失后继续${label}`, '#ff9800');
+            autoTradeTimerId = setTimeout(async () => {
+                autoTradeTimerId = null;
+                await waitForSlippageWarningToClear();
+                if (isAutoTrading) runAutoTradeLoop();
+            }, TRADE_RETRY_COOLDOWN_MS);
             return;
         }
 
@@ -3606,6 +3635,7 @@
             oneClickTradeOpenAttempted,
             consecutiveTradeFailures,
             lastTradeFailureState,
+            visibleSlippageWarning: hasVisibleSlippageWarning(),
             tradeStatsPaused: isTradeStatsPaused,
             scheduledAutoTradeEndAt,
             scheduledAutoTradeRemainingMs: scheduledAutoTradeEndAt ? Math.max(0, scheduledAutoTradeEndAt - Date.now()) : 0,
@@ -3710,7 +3740,7 @@
         const boostStatus = document.getElementById('boost-auto-status');
 
         return {
-            version: '1.2.9',
+            version: '1.2.10',
             ready: Boolean(calculatorPanelEl),
             legacyUserscriptDetected: hasVisibleLegacyUserscriptPanel(),
             url: window.location.href,
