@@ -89,6 +89,7 @@
     const AUTO_TRADE_RELOAD_RESUME_DELAY_MS = 2500;
     const MAX_AUTO_TRADE_RELOAD_RECOVERIES = 3;
     const SLIPPAGE_TOO_LOW_RE = /滑点(?:设置)?过低|slippage(?:\s+tolerance)?(?:\s+is)?\s+too\s+low/i;
+    const SWAP_FAILED_RE = /兑换[^\r\n]{1,160}?为[^\r\n]{1,160}?失败|(?:swap|convert)[^\r\n]{0,160}?failed/i;
 
     let lastStats = {
         buy: 0,
@@ -3107,6 +3108,10 @@
             return 'slippage_too_low';
         }
 
+        if (SWAP_FAILED_RE.test(bodyText)) {
+            return 'swap_failed';
+        }
+
         if (bodyText.includes('第三方合约执行失败')) {
             const cancelButton = findElementByText('取消') || findElementByText('确定');
             if (cancelButton) triggerRealClick(cancelButton);
@@ -3132,18 +3137,24 @@
         return tradeNoticeInstanceIds.get(element);
     }
 
-    function hasVisibleSlippageWarning() {
-        const bodyText = document.body ? normalizeText(document.body.innerText) : '';
-        return SLIPPAGE_TOO_LOW_RE.test(bodyText);
+    function getVisibleRetryableTradeWarningState() {
+        const bodyText = document.body ? document.body.innerText : '';
+        if (SLIPPAGE_TOO_LOW_RE.test(bodyText)) return 'slippage_too_low';
+        if (SWAP_FAILED_RE.test(bodyText)) return 'swap_failed';
+        return '';
     }
 
-    async function waitForSlippageWarningToClear(timeoutMs = TRADE_STATUS_TIMEOUT_MS) {
+    function isRetryableTradeFailureState(state) {
+        return state === 'slippage_too_low' || state === 'swap_failed';
+    }
+
+    async function waitForRetryableTradeWarningToClear(timeoutMs = TRADE_STATUS_TIMEOUT_MS) {
         const deadline = Date.now() + timeoutMs;
         while (isAutoTrading && Date.now() < deadline) {
-            if (!hasVisibleSlippageWarning()) return true;
+            if (!getVisibleRetryableTradeWarningState()) return true;
             await sleep(200);
         }
-        return !hasVisibleSlippageWarning();
+        return !getVisibleRetryableTradeWarningState();
     }
 
     function getTradeStatusFlags() {
@@ -3157,16 +3168,16 @@
             .filter((element) => {
                 if (!element || (ownPanel && ownPanel.contains(element))) return false;
                 const text = normalizeText(element.innerText || element.textContent);
-                if (!/(交易(已提交|成功|失败)|第三方合约执行失败|数量不能为\s*0|余额不足|滑点(?:设置)?过低|insufficient\s+balance|slippage(?:\s+tolerance)?(?:\s+is)?\s+too\s+low)/i.test(text)) return false;
+                if (!/(交易(已提交|成功|失败)|第三方合约执行失败|兑换[^\r\n]{1,160}?为[^\r\n]{1,160}?失败|数量不能为\s*0|余额不足|滑点(?:设置)?过低|insufficient\s+balance|slippage(?:\s+tolerance)?(?:\s+is)?\s+too\s+low|(?:swap|convert)[^\r\n]{0,160}?failed)/i.test(text)) return false;
                 if (text.length > 180 || !isVisible(element)) return false;
 
                 const rect = element.getBoundingClientRect();
                 const style = window.getComputedStyle(element);
                 const className = String(element.className || '').toLowerCase();
                 const isOfficialTitle = className.includes('dex-notification-stack-title');
-                const isSlippageWarning = SLIPPAGE_TOO_LOW_RE.test(text);
+                const isRetryableWarning = SLIPPAGE_TOO_LOW_RE.test(text) || SWAP_FAILED_RE.test(text);
                 const toastLike = isOfficialTitle ||
-                    isSlippageWarning ||
+                    isRetryableWarning ||
                     style.position === 'fixed' ||
                     style.position === 'sticky' ||
                     rect.top < Math.max(220, window.innerHeight * 0.28) ||
@@ -3203,7 +3214,8 @@
             contractFailed: signature.includes('第三方合约执行失败'),
             zeroAmount: /数量不能为\s*0/.test(signature),
             insufficientBalance: /余额不足|insufficient\s+balance/i.test(signature),
-            slippageTooLow: SLIPPAGE_TOO_LOW_RE.test(signature)
+            slippageTooLow: SLIPPAGE_TOO_LOW_RE.test(signature),
+            swapFailed: SWAP_FAILED_RE.test(signature)
         };
     }
 
@@ -3221,11 +3233,15 @@
             if (interruption === 'slippage_too_low') {
                 return { ok: false, state: 'slippage_too_low', message: `${label}滑点设置过低，保持当前方向重试` };
             }
+            if (interruption === 'swap_failed') {
+                return { ok: false, state: 'swap_failed', message: `${label}兑换失败，保持当前方向重试` };
+            }
 
             const flags = getTradeStatusFlags();
             const statusChanged = flags.signature !== beforeFlags.signature ||
                 flags.instanceSignature !== beforeFlags.instanceSignature ||
-                flags.slippageTooLow !== beforeFlags.slippageTooLow;
+                flags.slippageTooLow !== beforeFlags.slippageTooLow ||
+                flags.swapFailed !== beforeFlags.swapFailed;
 
             if (!flags.text && beforeFlags.text) {
                 beforeFlags = {
@@ -3238,7 +3254,8 @@
                     contractFailed: false,
                     zeroAmount: false,
                     insufficientBalance: false,
-                    slippageTooLow: false
+                    slippageTooLow: false,
+                    swapFailed: false
                 };
             }
 
@@ -3252,6 +3269,10 @@
 
             if (flags.slippageTooLow && (statusChanged || !beforeFlags.slippageTooLow)) {
                 return { ok: false, state: 'slippage_too_low', message: `${label}滑点设置过低，保持当前方向重试` };
+            }
+
+            if (flags.swapFailed && (statusChanged || !beforeFlags.swapFailed)) {
+                return { ok: false, state: 'swap_failed', message: `${label}兑换失败，保持当前方向重试` };
             }
 
             if (flags.contractFailed && (statusChanged || !beforeFlags.contractFailed)) {
@@ -3371,7 +3392,7 @@
 
         if (!tradeResult.ok) {
             lastTradeFailureState = tradeResult.state || 'unknown';
-            if (tradeResult.state === 'slippage_too_low') {
+            if (isRetryableTradeFailureState(tradeResult.state)) {
                 updateAutoTradeStatus(tradeResult.message, '#ff9800');
                 return false;
             }
@@ -3439,13 +3460,14 @@
         const success = await executeTradeSide(sideToRun, { requireSummaryChange: targetReached });
         if (!isAutoTrading) return;
 
-        if (!success && lastTradeFailureState === 'slippage_too_low') {
+        if (!success && isRetryableTradeFailureState(lastTradeFailureState)) {
             consecutiveTradeFailures = 0;
             autoTradeSide = sideToRun;
-            updateAutoTradeStatus(`${label}滑点设置过低，等待提示消失后继续${label}`, '#ff9800');
+            const reason = lastTradeFailureState === 'slippage_too_low' ? '滑点设置过低' : '兑换失败';
+            updateAutoTradeStatus(`${label}${reason}，等待提示消失后继续${label}`, '#ff9800');
             autoTradeTimerId = setTimeout(async () => {
                 autoTradeTimerId = null;
-                await waitForSlippageWarningToClear();
+                await waitForRetryableTradeWarningToClear();
                 if (isAutoTrading) runAutoTradeLoop();
             }, TRADE_RETRY_COOLDOWN_MS);
             return;
@@ -3635,7 +3657,7 @@
             oneClickTradeOpenAttempted,
             consecutiveTradeFailures,
             lastTradeFailureState,
-            visibleSlippageWarning: hasVisibleSlippageWarning(),
+            visibleRetryableTradeWarning: getVisibleRetryableTradeWarningState(),
             tradeStatsPaused: isTradeStatsPaused,
             scheduledAutoTradeEndAt,
             scheduledAutoTradeRemainingMs: scheduledAutoTradeEndAt ? Math.max(0, scheduledAutoTradeEndAt - Date.now()) : 0,
@@ -3740,7 +3762,7 @@
         const boostStatus = document.getElementById('boost-auto-status');
 
         return {
-            version: '1.2.10',
+            version: '1.2.11',
             ready: Boolean(calculatorPanelEl),
             legacyUserscriptDetected: hasVisibleLegacyUserscriptPanel(),
             url: window.location.href,
