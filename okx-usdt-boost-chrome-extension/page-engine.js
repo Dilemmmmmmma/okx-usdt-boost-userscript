@@ -49,6 +49,10 @@
     let isTradeStatsPaused = false;
     let scheduledAutoTradeEndAt = 0;
     let scheduledAutoTradeTimerId = null;
+    let lastTradeFailureState = '';
+
+    const tradeNoticeInstanceIds = new WeakMap();
+    let nextTradeNoticeInstanceId = 1;
 
     const LS_KEY_BOOST_DAILY = 'okx_usdt_boost_daily';
     const LS_KEY_BOOST_MULTI = 'okx_usdt_boost_multi';
@@ -3116,17 +3120,25 @@
         return '';
     }
 
+    function getTradeNoticeInstanceId(element) {
+        if (!tradeNoticeInstanceIds.has(element)) {
+            tradeNoticeInstanceIds.set(element, nextTradeNoticeInstanceId++);
+        }
+        return tradeNoticeInstanceIds.get(element);
+    }
+
     function getTradeStatusFlags() {
         const ownPanel = document.getElementById('okx-usdt-calculator');
         const notificationTitles = Array.from(document.querySelectorAll('.dex-notification-stack-title'));
-        const candidates = [
+        const notificationElements = Array.from(new Set([
             ...notificationTitles,
             ...Array.from(document.querySelectorAll('[class*="notification"], [class*="toast"], [class*="message"], [role="alert"]'))
-        ]
+        ]));
+        const candidates = notificationElements
             .filter((element) => {
                 if (!element || (ownPanel && ownPanel.contains(element))) return false;
                 const text = normalizeText(element.innerText || element.textContent);
-                if (!/(交易(已提交|成功|失败)|第三方合约执行失败|数量不能为\s*0|余额不足|insufficient\s+balance)/i.test(text)) return false;
+                if (!/(交易(已提交|成功|失败)|第三方合约执行失败|数量不能为\s*0|余额不足|滑点(?:设置)?过低|insufficient\s+balance|slippage(?:\s+tolerance)?(?:\s+is)?\s+too\s+low)/i.test(text)) return false;
                 if (text.length > 180 || !isVisible(element)) return false;
 
                 const rect = element.getBoundingClientRect();
@@ -3147,7 +3159,8 @@
             .map((element) => ({
                 text: normalizeText(element.innerText || element.textContent),
                 rect: element.getBoundingClientRect(),
-                official: String(element.className || '').toLowerCase().includes('dex-notification-stack-title')
+                official: String(element.className || '').toLowerCase().includes('dex-notification-stack-title'),
+                instanceId: getTradeNoticeInstanceId(element)
             }))
             .sort((a, b) => Number(b.official) - Number(a.official) || a.rect.top - b.rect.top || a.text.length - b.text.length);
 
@@ -3156,15 +3169,20 @@
             .map((candidate) => candidate.text)
             .filter(Boolean)
             .join('|');
+        const instanceSignature = candidates
+            .map((candidate) => candidate.instanceId)
+            .join('|');
         return {
             text: normalized,
             signature,
+            instanceSignature,
             submitted: signature.includes('交易已提交'),
             success: signature.includes('交易成功'),
             failed: signature.includes('交易失败'),
             contractFailed: signature.includes('第三方合约执行失败'),
             zeroAmount: /数量不能为\s*0/.test(signature),
-            insufficientBalance: /余额不足|insufficient\s+balance/i.test(signature)
+            insufficientBalance: /余额不足|insufficient\s+balance/i.test(signature),
+            slippageTooLow: /滑点(?:设置)?过低|slippage(?:\s+tolerance)?(?:\s+is)?\s+too\s+low/i.test(signature)
         };
     }
 
@@ -3181,26 +3199,42 @@
             }
 
             const flags = getTradeStatusFlags();
-            const textChanged = flags.signature !== beforeFlags.signature;
+            const statusChanged = flags.signature !== beforeFlags.signature ||
+                flags.instanceSignature !== beforeFlags.instanceSignature;
 
             if (!flags.text && beforeFlags.text) {
-                beforeFlags = { text: '', signature: '', submitted: false, success: false, failed: false, contractFailed: false, zeroAmount: false, insufficientBalance: false };
+                beforeFlags = {
+                    text: '',
+                    signature: '',
+                    instanceSignature: '',
+                    submitted: false,
+                    success: false,
+                    failed: false,
+                    contractFailed: false,
+                    zeroAmount: false,
+                    insufficientBalance: false,
+                    slippageTooLow: false
+                };
             }
 
-            if (side === 'sell' && flags.zeroAmount && (textChanged || !beforeFlags.zeroAmount)) {
+            if (side === 'sell' && flags.zeroAmount && (statusChanged || !beforeFlags.zeroAmount)) {
                 return { ok: true, state: 'empty_sell', message: '卖出数量为 0，按已卖出处理' };
             }
 
-            if (side === 'buy' && flags.insufficientBalance && (textChanged || !beforeFlags.insufficientBalance)) {
+            if (side === 'buy' && flags.insufficientBalance && (statusChanged || !beforeFlags.insufficientBalance)) {
                 return { ok: false, state: 'insufficient_balance', message: 'USDT 余额不足，先尝试卖出' };
             }
 
-            if (flags.contractFailed && (textChanged || !beforeFlags.contractFailed)) {
+            if (flags.slippageTooLow && (statusChanged || !beforeFlags.slippageTooLow)) {
+                return { ok: false, state: 'slippage_too_low', message: `${label}滑点设置过低，保持当前方向重试` };
+            }
+
+            if (flags.contractFailed && (statusChanged || !beforeFlags.contractFailed)) {
                 await recoverInstantTradePanel();
                 return { ok: false, state: 'contract_failed', message: `${label}第三方合约执行失败，继续${label}` };
             }
 
-            if (flags.submitted && (textChanged || !beforeFlags.submitted)) {
+            if (flags.submitted && (statusChanged || !beforeFlags.submitted)) {
                 sawSubmitted = true;
                 deadline = Math.max(deadline, Date.now() + TRADE_SUBMITTED_STATUS_TIMEOUT_MS);
                 if (Date.now() - lastStatusAt > 800) {
@@ -3209,11 +3243,11 @@
                 }
             }
 
-            if (flags.failed && (sawSubmitted || textChanged || !beforeFlags.failed)) {
+            if (flags.failed && (sawSubmitted || statusChanged || !beforeFlags.failed)) {
                 return { ok: false, state: 'failed', message: `${label}交易失败，准备重试` };
             }
 
-            if (flags.success && (sawSubmitted || textChanged || !beforeFlags.success)) {
+            if (flags.success && (sawSubmitted || statusChanged || !beforeFlags.success)) {
                 return { ok: true, state: 'success', message: `${label}交易成功` };
             }
 
@@ -3267,6 +3301,7 @@
         };
         const requireSummaryChange = !isTradeStatsPaused && (side === 'sell' || Boolean(options.requireSummaryChange));
 
+        lastTradeFailureState = '';
         updateAutoTradeStatus(`${label}准备中`, '#2196f3');
         const tradeMode = await ensureTradeExecutorMode();
         if (!tradeMode) {
@@ -3310,6 +3345,12 @@
         }
 
         if (!tradeResult.ok) {
+            lastTradeFailureState = tradeResult.state || 'unknown';
+            if (tradeResult.state === 'slippage_too_low') {
+                updateAutoTradeStatus(tradeResult.message, '#ff9800');
+                return false;
+            }
+
             if (side === 'buy' && tradeResult.state === 'insufficient_balance') {
                 forceSellBeforeStop = true;
                 autoTradeSide = 'sell';
@@ -3372,6 +3413,14 @@
 
         const success = await executeTradeSide(sideToRun, { requireSummaryChange: targetReached });
         if (!isAutoTrading) return;
+
+        if (!success && lastTradeFailureState === 'slippage_too_low') {
+            consecutiveTradeFailures = 0;
+            autoTradeSide = sideToRun;
+            updateAutoTradeStatus(`${label}滑点设置过低，1 秒后继续${label}`, '#ff9800');
+            autoTradeTimerId = setTimeout(runAutoTradeLoop, TRADE_RETRY_COOLDOWN_MS);
+            return;
+        }
 
         const latestTargetVolumeStats = calculateStats();
 
@@ -3556,6 +3605,7 @@
             isAutoTradeReloading,
             oneClickTradeOpenAttempted,
             consecutiveTradeFailures,
+            lastTradeFailureState,
             tradeStatsPaused: isTradeStatsPaused,
             scheduledAutoTradeEndAt,
             scheduledAutoTradeRemainingMs: scheduledAutoTradeEndAt ? Math.max(0, scheduledAutoTradeEndAt - Date.now()) : 0,
@@ -3660,7 +3710,7 @@
         const boostStatus = document.getElementById('boost-auto-status');
 
         return {
-            version: '1.2.8',
+            version: '1.2.9',
             ready: Boolean(calculatorPanelEl),
             legacyUserscriptDetected: hasVisibleLegacyUserscriptPanel(),
             url: window.location.href,
