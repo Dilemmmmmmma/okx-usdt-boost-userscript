@@ -1,7 +1,7 @@
 (function() {
     'use strict';
 
-    const ENGINE_VERSION = '1.2.18';
+    const ENGINE_VERSION = '1.2.19';
     const ENGINE_RELOAD_MARKER = 'okx_boost_engine_reload_version';
 
     // The extension side panel owns the visible UI. This hidden compatibility
@@ -112,6 +112,7 @@
     const SLIPPAGE_TOO_LOW_RE = /滑点(?:设置)?过低|slippage(?:\s+tolerance)?(?:\s+is)?\s+too\s+low/i;
     const SWAP_FAILED_RE = /兑换[^\r\n]{1,160}?为[^\r\n]{1,160}?失败|(?:swap|convert)[^\r\n]{0,160}?failed/i;
     const RWA_MIN_QUOTE_RE = /对于\s*RWA\s*代币[，,]?\s*OKX\s+DEX\s+Aggregator\s*仅支持大于\s*15\s*USD(?:T|C)?\s*的询价[。.]?\s*请提高金额后重试/i;
+    const USDT_INSUFFICIENT_ACTION_RE = /USDT\s*余额不足[，,]?\s*去补充/i;
 
     let lastStats = {
         buy: 0,
@@ -144,6 +145,12 @@
         if (!scope || typeof scope.querySelectorAll !== 'function') return false;
         return Array.from(scope.querySelectorAll('.dex-alert-desc, [role="alert"]'))
             .some((element) => isVisible(element) && hasRwaMinimumQuoteWarning(element.innerText || element.textContent));
+    }
+
+    function hasVisibleUsdtInsufficientAction(scope = document) {
+        if (!scope || typeof scope.querySelectorAll !== 'function') return false;
+        return Array.from(scope.querySelectorAll('button, [role="button"]'))
+            .some((element) => isVisible(element) && USDT_INSUFFICIENT_ACTION_RE.test(normalizeText(element.innerText || element.textContent)));
     }
 
     function parseAmountText(text) {
@@ -3101,6 +3108,15 @@
         let lastWaitingStatusAt = 0;
 
         while (isAutoTrading && Date.now() < deadline) {
+            const sidebarPanel = getSidebarTradePanel();
+            if (side === 'buy' && hasVisibleUsdtInsufficientAction(sidebarPanel || document)) {
+                return {
+                    ok: false,
+                    state: 'insufficient_balance',
+                    message: 'USDT 余额不足，立即转为 100% 卖出'
+                };
+            }
+
             if (side === 'sell' && hasVisibleRwaMinimumQuoteWarning()) {
                 return {
                     ok: true,
@@ -3432,6 +3448,13 @@
             await sleep(500);
             beforeTradeStatus = getTradeStatusFlags();
             const submitResult = await clickSidebarSubmitButton(side, 8000);
+            if (side === 'buy' && submitResult.state === 'insufficient_balance') {
+                lastTradeFailureState = 'insufficient_balance';
+                forceSellBeforeStop = true;
+                autoTradeSide = 'sell';
+                updateAutoTradeStatus(submitResult.message, '#ff9800');
+                return false;
+            }
             if (side === 'sell' && submitResult.ok && submitResult.state === 'rwa_dust') {
                 await refreshOfficialBoostRecordsAfterTrade();
                 calculateStats();
