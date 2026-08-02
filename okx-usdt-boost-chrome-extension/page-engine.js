@@ -1,7 +1,7 @@
 (function() {
     'use strict';
 
-    const ENGINE_VERSION = '1.2.16';
+    const ENGINE_VERSION = '1.2.17';
     const ENGINE_RELOAD_MARKER = 'okx_boost_engine_reload_version';
 
     // The extension side panel owns the visible UI. This hidden compatibility
@@ -3188,7 +3188,7 @@
         const notificationTitles = Array.from(document.querySelectorAll('.dex-notification-stack-title'));
         const notificationElements = Array.from(new Set([
             ...notificationTitles,
-            ...Array.from(document.querySelectorAll('[class*="notification"], [class*="toast"], [class*="message"], [role="alert"]'))
+            ...Array.from(document.querySelectorAll('.dex-alert-desc, [class*="notification"], [class*="toast"], [class*="message"], [role="alert"]'))
         ]));
         const candidates = notificationElements
             .filter((element) => {
@@ -3232,10 +3232,15 @@
         const instanceSignature = candidates
             .map((candidate) => candidate.instanceId)
             .join('|');
+        const successInstanceSignature = candidates
+            .filter((candidate) => candidate.text.includes('交易成功'))
+            .map((candidate) => candidate.instanceId)
+            .join('|');
         return {
             text: normalized,
             signature,
             instanceSignature,
+            successInstanceSignature,
             submitted: signature.includes('交易已提交'),
             success: signature.includes('交易成功'),
             failed: signature.includes('交易失败'),
@@ -3256,6 +3261,18 @@
 
         while (isAutoTrading && Date.now() < deadline) {
             const interruption = await handleTradeInterruptions();
+            const flags = getTradeStatusFlags();
+            const statusChanged = flags.signature !== beforeFlags.signature ||
+                flags.instanceSignature !== beforeFlags.instanceSignature ||
+                flags.contractFailed !== beforeFlags.contractFailed ||
+                flags.slippageTooLow !== beforeFlags.slippageTooLow ||
+                flags.swapFailed !== beforeFlags.swapFailed ||
+                flags.rwaBelowMinimum !== beforeFlags.rwaBelowMinimum;
+
+            if (flags.success && flags.successInstanceSignature !== beforeFlags.successInstanceSignature) {
+                return { ok: true, state: 'success', message: `${label}交易成功` };
+            }
+
             if (interruption === 'contract_failed' && !beforeFlags.contractFailed) {
                 return { ok: false, state: 'contract_failed', message: `${label}第三方合约执行失败，继续${label}` };
             }
@@ -3265,29 +3282,18 @@
             if (interruption === 'swap_failed' && !beforeFlags.swapFailed) {
                 return { ok: false, state: 'swap_failed', message: `${label}兑换失败，保持当前方向重试` };
             }
-            if (interruption === 'rwa_below_minimum' && !beforeFlags.rwaBelowMinimum) {
+            if (interruption === 'rwa_below_minimum' && (side === 'sell' || !beforeFlags.rwaBelowMinimum)) {
                 return side === 'sell'
                     ? { ok: true, state: 'rwa_dust', message: 'RWA 剩余仓位低于 15 USD，保留零头并继续买入' }
                     : { ok: false, state: 'rwa_buy_below_minimum', message: 'RWA 买入金额低于 15 USD，请提高买入快捷金额' };
             }
-
-            const flags = getTradeStatusFlags();
-            if (!flags.contractFailed) beforeFlags.contractFailed = false;
-            if (!flags.slippageTooLow) beforeFlags.slippageTooLow = false;
-            if (!flags.swapFailed) beforeFlags.swapFailed = false;
-            if (!flags.rwaBelowMinimum) beforeFlags.rwaBelowMinimum = false;
-            const statusChanged = flags.signature !== beforeFlags.signature ||
-                flags.instanceSignature !== beforeFlags.instanceSignature ||
-                flags.contractFailed !== beforeFlags.contractFailed ||
-                flags.slippageTooLow !== beforeFlags.slippageTooLow ||
-                flags.swapFailed !== beforeFlags.swapFailed ||
-                flags.rwaBelowMinimum !== beforeFlags.rwaBelowMinimum;
 
             if (!flags.text && beforeFlags.text) {
                 beforeFlags = {
                     text: '',
                     signature: '',
                     instanceSignature: '',
+                    successInstanceSignature: '',
                     submitted: false,
                     success: false,
                     failed: false,
@@ -3316,7 +3322,7 @@
                 return { ok: false, state: 'swap_failed', message: `${label}兑换失败，保持当前方向重试` };
             }
 
-            if (flags.rwaBelowMinimum && (statusChanged || !beforeFlags.rwaBelowMinimum)) {
+            if (flags.rwaBelowMinimum && (side === 'sell' || statusChanged || !beforeFlags.rwaBelowMinimum)) {
                 return side === 'sell'
                     ? { ok: true, state: 'rwa_dust', message: 'RWA 剩余仓位低于 15 USD，保留零头并继续买入' }
                     : { ok: false, state: 'rwa_buy_below_minimum', message: 'RWA 买入金额低于 15 USD，请提高买入快捷金额' };
@@ -3326,7 +3332,7 @@
                 return { ok: false, state: 'contract_failed', message: `${label}第三方合约执行失败，继续${label}` };
             }
 
-            if (flags.submitted && (statusChanged || !beforeFlags.submitted)) {
+            if (flags.submitted && !sawSubmitted && (statusChanged || !beforeFlags.submitted)) {
                 sawSubmitted = true;
                 deadline = Math.max(deadline, Date.now() + TRADE_SUBMITTED_STATUS_TIMEOUT_MS);
                 if (Date.now() - lastStatusAt > 800) {
@@ -3337,10 +3343,6 @@
 
             if (flags.failed && (sawSubmitted || statusChanged || !beforeFlags.failed)) {
                 return { ok: false, state: 'failed', message: `${label}交易失败，准备重试` };
-            }
-
-            if (flags.success && (sawSubmitted || statusChanged || !beforeFlags.success)) {
-                return { ok: true, state: 'success', message: `${label}交易成功` };
             }
 
             await sleep(350);
