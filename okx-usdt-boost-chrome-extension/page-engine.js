@@ -90,6 +90,7 @@
     const MAX_AUTO_TRADE_RELOAD_RECOVERIES = 3;
     const SLIPPAGE_TOO_LOW_RE = /滑点(?:设置)?过低|slippage(?:\s+tolerance)?(?:\s+is)?\s+too\s+low/i;
     const SWAP_FAILED_RE = /兑换[^\r\n]{1,160}?为[^\r\n]{1,160}?失败|(?:swap|convert)[^\r\n]{0,160}?failed/i;
+    const RWA_MIN_QUOTE_RE = /RWA[^\r\n]{0,160}?仅支持大于\s*15\s*USD(?:T|C)?[^\r\n]{0,160}?询价[^\r\n]{0,160}?提高金额后重试/i;
 
     let lastStats = {
         buy: 0,
@@ -3112,6 +3113,10 @@
             return 'swap_failed';
         }
 
+        if (RWA_MIN_QUOTE_RE.test(bodyText)) {
+            return 'rwa_below_minimum';
+        }
+
         if (bodyText.includes('第三方合约执行失败')) {
             const cancelButton = findElementByText('取消') || findElementByText('确定');
             if (cancelButton) triggerRealClick(cancelButton);
@@ -3168,14 +3173,16 @@
             .filter((element) => {
                 if (!element || (ownPanel && ownPanel.contains(element))) return false;
                 const text = normalizeText(element.innerText || element.textContent);
-                if (!/(交易(已提交|成功|失败)|第三方合约执行失败|兑换[^\r\n]{1,160}?为[^\r\n]{1,160}?失败|数量不能为\s*0|余额不足|滑点(?:设置)?过低|insufficient\s+balance|slippage(?:\s+tolerance)?(?:\s+is)?\s+too\s+low|(?:swap|convert)[^\r\n]{0,160}?failed)/i.test(text)) return false;
+                if (!/(交易(已提交|成功|失败)|第三方合约执行失败|兑换[^\r\n]{1,160}?为[^\r\n]{1,160}?失败|RWA[^\r\n]{0,160}?仅支持大于\s*15\s*USD(?:T|C)?[^\r\n]{0,160}?询价[^\r\n]{0,160}?提高金额后重试|数量不能为\s*0|余额不足|滑点(?:设置)?过低|insufficient\s+balance|slippage(?:\s+tolerance)?(?:\s+is)?\s+too\s+low|(?:swap|convert)[^\r\n]{0,160}?failed)/i.test(text)) return false;
                 if (text.length > 180 || !isVisible(element)) return false;
 
                 const rect = element.getBoundingClientRect();
                 const style = window.getComputedStyle(element);
                 const className = String(element.className || '').toLowerCase();
                 const isOfficialTitle = className.includes('dex-notification-stack-title');
-                const isRetryableWarning = SLIPPAGE_TOO_LOW_RE.test(text) || SWAP_FAILED_RE.test(text);
+                const isRetryableWarning = SLIPPAGE_TOO_LOW_RE.test(text) ||
+                    SWAP_FAILED_RE.test(text) ||
+                    RWA_MIN_QUOTE_RE.test(text);
                 const toastLike = isOfficialTitle ||
                     isRetryableWarning ||
                     style.position === 'fixed' ||
@@ -3215,7 +3222,8 @@
             zeroAmount: /数量不能为\s*0/.test(signature),
             insufficientBalance: /余额不足|insufficient\s+balance/i.test(signature),
             slippageTooLow: SLIPPAGE_TOO_LOW_RE.test(signature),
-            swapFailed: SWAP_FAILED_RE.test(signature)
+            swapFailed: SWAP_FAILED_RE.test(signature),
+            rwaBelowMinimum: RWA_MIN_QUOTE_RE.test(signature)
         };
     }
 
@@ -3236,12 +3244,18 @@
             if (interruption === 'swap_failed') {
                 return { ok: false, state: 'swap_failed', message: `${label}兑换失败，保持当前方向重试` };
             }
+            if (interruption === 'rwa_below_minimum') {
+                return side === 'sell'
+                    ? { ok: true, state: 'rwa_dust', message: 'RWA 剩余仓位低于 15 USD，保留零头并继续买入' }
+                    : { ok: false, state: 'rwa_buy_below_minimum', message: 'RWA 买入金额低于 15 USD，请提高买入快捷金额' };
+            }
 
             const flags = getTradeStatusFlags();
             const statusChanged = flags.signature !== beforeFlags.signature ||
                 flags.instanceSignature !== beforeFlags.instanceSignature ||
                 flags.slippageTooLow !== beforeFlags.slippageTooLow ||
-                flags.swapFailed !== beforeFlags.swapFailed;
+                flags.swapFailed !== beforeFlags.swapFailed ||
+                flags.rwaBelowMinimum !== beforeFlags.rwaBelowMinimum;
 
             if (!flags.text && beforeFlags.text) {
                 beforeFlags = {
@@ -3255,7 +3269,8 @@
                     zeroAmount: false,
                     insufficientBalance: false,
                     slippageTooLow: false,
-                    swapFailed: false
+                    swapFailed: false,
+                    rwaBelowMinimum: false
                 };
             }
 
@@ -3273,6 +3288,12 @@
 
             if (flags.swapFailed && (statusChanged || !beforeFlags.swapFailed)) {
                 return { ok: false, state: 'swap_failed', message: `${label}兑换失败，保持当前方向重试` };
+            }
+
+            if (flags.rwaBelowMinimum && (statusChanged || !beforeFlags.rwaBelowMinimum)) {
+                return side === 'sell'
+                    ? { ok: true, state: 'rwa_dust', message: 'RWA 剩余仓位低于 15 USD，保留零头并继续买入' }
+                    : { ok: false, state: 'rwa_buy_below_minimum', message: 'RWA 买入金额低于 15 USD，请提高买入快捷金额' };
             }
 
             if (flags.contractFailed && (statusChanged || !beforeFlags.contractFailed)) {
@@ -3382,6 +3403,13 @@
             '#2196f3'
         );
         const tradeResult = await waitForTradeResult(side, beforeTradeStatus);
+        if (side === 'sell' && tradeResult.ok && tradeResult.state === 'rwa_dust') {
+            await refreshOfficialBoostRecordsAfterTrade();
+            calculateStats();
+            updateAutoTradeStatus(tradeResult.message, '#4caf50');
+            return true;
+        }
+
         if (side === 'sell' && tradeResult.ok && tradeResult.state === 'empty_sell') {
             await refreshOrderHistoryAfterConfirmedSell(beforeStats.order, { requireSellIncrease: false });
             await refreshOfficialBoostRecordsAfterTrade();
@@ -3762,7 +3790,7 @@
         const boostStatus = document.getElementById('boost-auto-status');
 
         return {
-            version: '1.2.11',
+            version: '1.2.12',
             ready: Boolean(calculatorPanelEl),
             legacyUserscriptDetected: hasVisibleLegacyUserscriptPanel(),
             url: window.location.href,
