@@ -1,7 +1,7 @@
 (function() {
     'use strict';
 
-    const ENGINE_VERSION = '1.2.17';
+    const ENGINE_VERSION = '1.2.18';
     const ENGINE_RELOAD_MARKER = 'okx_boost_engine_reload_version';
 
     // The extension side panel owns the visible UI. This hidden compatibility
@@ -138,6 +138,12 @@
 
     function hasRwaMinimumQuoteWarning(text) {
         return RWA_MIN_QUOTE_RE.test(normalizeText(text));
+    }
+
+    function hasVisibleRwaMinimumQuoteWarning(scope = document) {
+        if (!scope || typeof scope.querySelectorAll !== 'function') return false;
+        return Array.from(scope.querySelectorAll('.dex-alert-desc, [role="alert"]'))
+            .some((element) => isVisible(element) && hasRwaMinimumQuoteWarning(element.innerText || element.textContent));
     }
 
     function parseAmountText(text) {
@@ -3095,10 +3101,19 @@
         let lastWaitingStatusAt = 0;
 
         while (isAutoTrading && Date.now() < deadline) {
+            if (side === 'sell' && hasVisibleRwaMinimumQuoteWarning()) {
+                return {
+                    ok: true,
+                    state: 'rwa_dust',
+                    message: 'RWA 剩余仓位低于 15 USD，保留零头并继续买入'
+                };
+            }
+
             const submitButton = findSidebarSubmitButton(side, { includeDisabled: true });
             if (submitButton && !isDomDisabledButton(submitButton)) {
                 updateAutoTradeStatus(`右侧栏点击${sideText}按钮`, '#2196f3');
-                return triggerRealClick(submitButton);
+                const clicked = triggerRealClick(submitButton);
+                if (clicked) return { ok: true, state: 'submitted' };
             }
 
             if (submitButton && Date.now() - lastWaitingStatusAt > 1000) {
@@ -3108,7 +3123,7 @@
             await sleep(300);
         }
 
-        return false;
+        return { ok: false, state: 'submit_unavailable' };
     }
 
     async function clickTradeAmountButton(side, timeoutMs, mode = activeTradeExecutorMode) {
@@ -3416,8 +3431,14 @@
         if (tradeMode === 'sidebar') {
             await sleep(500);
             beforeTradeStatus = getTradeStatusFlags();
-            const submitted = await clickSidebarSubmitButton(side, 8000);
-            if (!submitted) {
+            const submitResult = await clickSidebarSubmitButton(side, 8000);
+            if (side === 'sell' && submitResult.ok && submitResult.state === 'rwa_dust') {
+                await refreshOfficialBoostRecordsAfterTrade();
+                calculateStats();
+                updateAutoTradeStatus(submitResult.message, '#4caf50');
+                return true;
+            }
+            if (!submitResult.ok) {
                 updateAutoTradeStatus(`右侧栏${label}按钮未找到或未启用`, '#ff5252');
                 return false;
             }
