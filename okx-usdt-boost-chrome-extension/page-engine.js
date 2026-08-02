@@ -90,7 +90,7 @@
     const MAX_AUTO_TRADE_RELOAD_RECOVERIES = 3;
     const SLIPPAGE_TOO_LOW_RE = /滑点(?:设置)?过低|slippage(?:\s+tolerance)?(?:\s+is)?\s+too\s+low/i;
     const SWAP_FAILED_RE = /兑换[^\r\n]{1,160}?为[^\r\n]{1,160}?失败|(?:swap|convert)[^\r\n]{0,160}?failed/i;
-    const RWA_MIN_QUOTE_RE = /RWA[^\r\n]{0,160}?仅支持大于\s*15\s*USD(?:T|C)?[^\r\n]{0,160}?询价[^\r\n]{0,160}?提高金额后重试/i;
+    const RWA_MIN_QUOTE_RE = /对于\s*RWA\s*代币[，,]?\s*OKX\s+DEX\s+Aggregator\s*仅支持大于\s*15\s*USD(?:T|C)?\s*的询价[。.]?\s*请提高金额后重试/i;
 
     let lastStats = {
         buy: 0,
@@ -113,6 +113,10 @@
 
     function normalizeText(text) {
         return String(text || '').replace(/\s+/g, ' ').trim();
+    }
+
+    function hasRwaMinimumQuoteWarning(text) {
+        return RWA_MIN_QUOTE_RE.test(normalizeText(text));
     }
 
     function parseAmountText(text) {
@@ -3113,7 +3117,7 @@
             return 'swap_failed';
         }
 
-        if (RWA_MIN_QUOTE_RE.test(bodyText)) {
+        if (hasRwaMinimumQuoteWarning(bodyText)) {
             return 'rwa_below_minimum';
         }
 
@@ -3173,7 +3177,7 @@
             .filter((element) => {
                 if (!element || (ownPanel && ownPanel.contains(element))) return false;
                 const text = normalizeText(element.innerText || element.textContent);
-                if (!/(交易(已提交|成功|失败)|第三方合约执行失败|兑换[^\r\n]{1,160}?为[^\r\n]{1,160}?失败|RWA[^\r\n]{0,160}?仅支持大于\s*15\s*USD(?:T|C)?[^\r\n]{0,160}?询价[^\r\n]{0,160}?提高金额后重试|数量不能为\s*0|余额不足|滑点(?:设置)?过低|insufficient\s+balance|slippage(?:\s+tolerance)?(?:\s+is)?\s+too\s+low|(?:swap|convert)[^\r\n]{0,160}?failed)/i.test(text)) return false;
+                if (!/(交易(已提交|成功|失败)|第三方合约执行失败|兑换[^\r\n]{1,160}?为[^\r\n]{1,160}?失败|数量不能为\s*0|余额不足|滑点(?:设置)?过低|insufficient\s+balance|slippage(?:\s+tolerance)?(?:\s+is)?\s+too\s+low|(?:swap|convert)[^\r\n]{0,160}?failed)/i.test(text) && !hasRwaMinimumQuoteWarning(text)) return false;
                 if (text.length > 180 || !isVisible(element)) return false;
 
                 const rect = element.getBoundingClientRect();
@@ -3182,7 +3186,7 @@
                 const isOfficialTitle = className.includes('dex-notification-stack-title');
                 const isRetryableWarning = SLIPPAGE_TOO_LOW_RE.test(text) ||
                     SWAP_FAILED_RE.test(text) ||
-                    RWA_MIN_QUOTE_RE.test(text);
+                    hasRwaMinimumQuoteWarning(text);
                 const toastLike = isOfficialTitle ||
                     isRetryableWarning ||
                     style.position === 'fixed' ||
@@ -3223,7 +3227,7 @@
             insufficientBalance: /余额不足|insufficient\s+balance/i.test(signature),
             slippageTooLow: SLIPPAGE_TOO_LOW_RE.test(signature),
             swapFailed: SWAP_FAILED_RE.test(signature),
-            rwaBelowMinimum: RWA_MIN_QUOTE_RE.test(signature)
+            rwaBelowMinimum: hasRwaMinimumQuoteWarning(signature)
         };
     }
 
@@ -3686,6 +3690,7 @@
             consecutiveTradeFailures,
             lastTradeFailureState,
             visibleRetryableTradeWarning: getVisibleRetryableTradeWarningState(),
+            visibleRwaMinimumQuoteWarning: hasRwaMinimumQuoteWarning(document.body ? document.body.innerText : ''),
             tradeStatsPaused: isTradeStatsPaused,
             scheduledAutoTradeEndAt,
             scheduledAutoTradeRemainingMs: scheduledAutoTradeEndAt ? Math.max(0, scheduledAutoTradeEndAt - Date.now()) : 0,
@@ -3790,7 +3795,7 @@
         const boostStatus = document.getElementById('boost-auto-status');
 
         return {
-            version: '1.2.12',
+            version: '1.2.13',
             ready: Boolean(calculatorPanelEl),
             legacyUserscriptDetected: hasVisibleLegacyUserscriptPanel(),
             url: window.location.href,
