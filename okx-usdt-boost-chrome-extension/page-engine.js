@@ -3096,16 +3096,6 @@
         return false;
     }
 
-    async function recoverInstantTradePanel() {
-        oneClickTradeOpenAttempted = false;
-        lastSwapFormContainer = null;
-        await sleep(500);
-        if (activeTradeExecutorMode === 'sidebar') {
-            return Boolean(getSidebarTradePanel());
-        }
-        return ensureInstantTradePanelOpenOnce();
-    }
-
     async function handleTradeInterruptions() {
         const bodyText = document.body ? document.body.innerText : '';
 
@@ -3124,8 +3114,7 @@
         if (bodyText.includes('第三方合约执行失败')) {
             const cancelButton = findElementByText('取消') || findElementByText('确定');
             if (cancelButton) triggerRealClick(cancelButton);
-            updateAutoTradeStatus('第三方合约执行失败，恢复交易入口后继续', '#ff9800');
-            await recoverInstantTradePanel();
+            updateAutoTradeStatus('第三方合约执行失败，冷却后重试当前方向', '#ff9800');
             return 'contract_failed';
         }
 
@@ -3154,20 +3143,14 @@
     }
 
     function isRetryableTradeFailureState(state) {
-        return state === 'slippage_too_low' || state === 'swap_failed';
-    }
-
-    async function waitForRetryableTradeWarningToClear(timeoutMs = TRADE_STATUS_TIMEOUT_MS) {
-        const deadline = Date.now() + timeoutMs;
-        while (isAutoTrading && Date.now() < deadline) {
-            if (!getVisibleRetryableTradeWarningState()) return true;
-            await sleep(200);
-        }
-        return !getVisibleRetryableTradeWarningState();
+        return state === 'slippage_too_low' ||
+            state === 'swap_failed' ||
+            state === 'contract_failed';
     }
 
     function getTradeStatusFlags() {
         const ownPanel = document.getElementById('okx-usdt-calculator');
+        const bodyText = document.body ? document.body.innerText : '';
         const notificationTitles = Array.from(document.querySelectorAll('.dex-notification-stack-title'));
         const notificationElements = Array.from(new Set([
             ...notificationTitles,
@@ -3222,12 +3205,12 @@
             submitted: signature.includes('交易已提交'),
             success: signature.includes('交易成功'),
             failed: signature.includes('交易失败'),
-            contractFailed: signature.includes('第三方合约执行失败'),
+            contractFailed: signature.includes('第三方合约执行失败') || bodyText.includes('第三方合约执行失败'),
             zeroAmount: /数量不能为\s*0/.test(signature),
             insufficientBalance: /余额不足|insufficient\s+balance/i.test(signature),
-            slippageTooLow: SLIPPAGE_TOO_LOW_RE.test(signature),
-            swapFailed: SWAP_FAILED_RE.test(signature),
-            rwaBelowMinimum: hasRwaMinimumQuoteWarning(signature)
+            slippageTooLow: SLIPPAGE_TOO_LOW_RE.test(signature) || SLIPPAGE_TOO_LOW_RE.test(bodyText),
+            swapFailed: SWAP_FAILED_RE.test(signature) || SWAP_FAILED_RE.test(bodyText),
+            rwaBelowMinimum: hasRwaMinimumQuoteWarning(signature) || hasRwaMinimumQuoteWarning(bodyText)
         };
     }
 
@@ -3239,24 +3222,29 @@
 
         while (isAutoTrading && Date.now() < deadline) {
             const interruption = await handleTradeInterruptions();
-            if (interruption === 'contract_failed') {
+            if (interruption === 'contract_failed' && !beforeFlags.contractFailed) {
                 return { ok: false, state: 'contract_failed', message: `${label}第三方合约执行失败，继续${label}` };
             }
-            if (interruption === 'slippage_too_low') {
+            if (interruption === 'slippage_too_low' && !beforeFlags.slippageTooLow) {
                 return { ok: false, state: 'slippage_too_low', message: `${label}滑点设置过低，保持当前方向重试` };
             }
-            if (interruption === 'swap_failed') {
+            if (interruption === 'swap_failed' && !beforeFlags.swapFailed) {
                 return { ok: false, state: 'swap_failed', message: `${label}兑换失败，保持当前方向重试` };
             }
-            if (interruption === 'rwa_below_minimum') {
+            if (interruption === 'rwa_below_minimum' && !beforeFlags.rwaBelowMinimum) {
                 return side === 'sell'
                     ? { ok: true, state: 'rwa_dust', message: 'RWA 剩余仓位低于 15 USD，保留零头并继续买入' }
                     : { ok: false, state: 'rwa_buy_below_minimum', message: 'RWA 买入金额低于 15 USD，请提高买入快捷金额' };
             }
 
             const flags = getTradeStatusFlags();
+            if (!flags.contractFailed) beforeFlags.contractFailed = false;
+            if (!flags.slippageTooLow) beforeFlags.slippageTooLow = false;
+            if (!flags.swapFailed) beforeFlags.swapFailed = false;
+            if (!flags.rwaBelowMinimum) beforeFlags.rwaBelowMinimum = false;
             const statusChanged = flags.signature !== beforeFlags.signature ||
                 flags.instanceSignature !== beforeFlags.instanceSignature ||
+                flags.contractFailed !== beforeFlags.contractFailed ||
                 flags.slippageTooLow !== beforeFlags.slippageTooLow ||
                 flags.swapFailed !== beforeFlags.swapFailed ||
                 flags.rwaBelowMinimum !== beforeFlags.rwaBelowMinimum;
@@ -3301,7 +3289,6 @@
             }
 
             if (flags.contractFailed && (statusChanged || !beforeFlags.contractFailed)) {
-                await recoverInstantTradePanel();
                 return { ok: false, state: 'contract_failed', message: `${label}第三方合约执行失败，继续${label}` };
             }
 
@@ -3495,13 +3482,11 @@
         if (!success && isRetryableTradeFailureState(lastTradeFailureState)) {
             consecutiveTradeFailures = 0;
             autoTradeSide = sideToRun;
-            const reason = lastTradeFailureState === 'slippage_too_low' ? '滑点设置过低' : '兑换失败';
-            updateAutoTradeStatus(`${label}${reason}，等待提示消失后继续${label}`, '#ff9800');
-            autoTradeTimerId = setTimeout(async () => {
-                autoTradeTimerId = null;
-                await waitForRetryableTradeWarningToClear();
-                if (isAutoTrading) runAutoTradeLoop();
-            }, TRADE_RETRY_COOLDOWN_MS);
+            const reason = lastTradeFailureState === 'slippage_too_low'
+                ? '滑点设置过低'
+                : (lastTradeFailureState === 'contract_failed' ? '第三方合约执行失败' : '兑换失败');
+            updateAutoTradeStatus(`${label}${reason}，1 秒后继续${label}`, '#ff9800');
+            autoTradeTimerId = setTimeout(runAutoTradeLoop, TRADE_RETRY_COOLDOWN_MS);
             return;
         }
 
@@ -3795,7 +3780,7 @@
         const boostStatus = document.getElementById('boost-auto-status');
 
         return {
-            version: '1.2.13',
+            version: '1.2.14',
             ready: Boolean(calculatorPanelEl),
             legacyUserscriptDetected: hasVisibleLegacyUserscriptPanel(),
             url: window.location.href,
