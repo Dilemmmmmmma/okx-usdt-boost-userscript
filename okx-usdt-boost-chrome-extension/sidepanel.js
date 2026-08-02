@@ -4,6 +4,7 @@
   const OKX_HOSTS = new Set(['web3.okx.com', 'web3.cnouxyex.co']);
   const BINANCE_HOST = 'www.binance.com';
   const BINANCE_WALLET_HOST = 'web3.binance.com';
+  const EXTENSION_VERSION = chrome.runtime.getManifest().version;
   const REFRESH_INTERVAL_MS = 2500;
   let activeTabId = null;
   let activePageKind = null;
@@ -226,6 +227,7 @@
     const boost = state.boost || {};
     const legacy = Boolean(state.legacyUserscriptDetected);
     const ready = Boolean(state.ready) && !legacy;
+    const engineVersionCurrent = state.version === EXTENSION_VERSION;
 
     if (activeWorkspace === 'boost') {
       setConnection(ready, legacy ? '检测到旧篡改猴脚本' : state.ready ? '已连接 OKX 页面' : 'OKX 页面引擎加载中');
@@ -233,6 +235,7 @@
         ? `${state.token.chainSlug} · ${state.token.tokenAddress.slice(0, 6)}...${state.token.tokenAddress.slice(-4)}`
         : '非代币详情页';
       setBoostControlsReady(ready);
+      $('ignore-sell-failure-toggle').disabled = !ready || !engineVersionCurrent;
     }
 
     $('summary-source').textContent = stats.sellSyncPending ? '卖出同步中' : stats.boostProgressOfficial ? 'Boost实时' : `08:00订单 ${stats.count || 0}`;
@@ -267,7 +270,15 @@
     const scheduled = Number(state.auto?.scheduledRemainingMs) > 0;
     $('schedule-button').textContent = scheduled ? '取消定时' : '开始倒计时';
     $('schedule-status').textContent = scheduled ? `将在 ${Math.ceil(state.auto.scheduledRemainingMs / 1000)} 秒后启动` : '定时启动未设置';
-    if (activeWorkspace === 'boost') setFooter(legacy ? '请停用旧篡改猴脚本，避免两个交易引擎同时运行' : state.auto?.status || '准备就绪', legacy);
+    if (activeWorkspace === 'boost') {
+      const versionMessage = state.auto?.running
+        ? `页面引擎仍为 ${state.version || '旧版'}，请先停止交易再刷新页面`
+        : `页面引擎仍为 ${state.version || '旧版'}，正在加载 ${EXTENSION_VERSION}`;
+      setFooter(
+        legacy ? '请停用旧篡改猴脚本，避免两个交易引擎同时运行' : (engineVersionCurrent ? state.auto?.status || '准备就绪' : versionMessage),
+        legacy || !engineVersionCurrent
+      );
+    }
   }
 
   function renderAlphaState(state) {
