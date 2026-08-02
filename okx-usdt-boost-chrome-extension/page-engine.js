@@ -47,6 +47,8 @@
     let isAutoTradeReloading = false;
     let activeTradeExecutorMode = 'instant';
     let isTradeStatsPaused = false;
+    let ignoreSellFailureStopEnabled = false;
+    let forceBuyAfterIgnoredSellFailure = false;
     let scheduledAutoTradeEndAt = 0;
     let scheduledAutoTradeTimerId = null;
     let lastTradeFailureState = '';
@@ -63,6 +65,7 @@
     const LS_KEY_BOOST_RECORDS_BY_ACCOUNT = 'okx_usdt_boost_records_by_account';
     const LS_KEY_AUTO_TRADE_RESUME = 'okx_usdt_auto_trade_resume';
     const LS_KEY_TRADE_STATS_PAUSED = 'okx_usdt_trade_stats_paused';
+    const LS_KEY_IGNORE_SELL_FAILURE_STOP = 'okx_usdt_ignore_sell_failure_stop';
     const LS_KEY_AUTO_TRADE_SCHEDULE_END_AT = 'okx_usdt_auto_trade_schedule_end_at';
     const BOOST_RECORDS_REFRESH_INTERVAL_MS = 300000;
     const BOOST_RECORDS_PATH = '/priapi/v1/dapp/boost/records';
@@ -904,6 +907,7 @@
         loadBoostSettings();
         loadRebateSettings();
         clearLegacyTradeStatsPauseSetting();
+        loadIgnoreSellFailureStopSetting();
         loadBoostRecordsCache();
         renderBoostRecords();
         refreshBoostRecordsFromCache();
@@ -962,6 +966,15 @@
     function clearLegacyTradeStatsPauseSetting() {
         isTradeStatsPaused = false;
         window.localStorage.removeItem(LS_KEY_TRADE_STATS_PAUSED);
+    }
+
+    function loadIgnoreSellFailureStopSetting() {
+        ignoreSellFailureStopEnabled = window.localStorage.getItem(LS_KEY_IGNORE_SELL_FAILURE_STOP) === 'true';
+    }
+
+    function setIgnoreSellFailureStopSetting(enabled) {
+        ignoreSellFailureStopEnabled = Boolean(enabled);
+        window.localStorage.setItem(LS_KEY_IGNORE_SELL_FAILURE_STOP, String(ignoreSellFailureStopEnabled));
     }
 
     function updateBoostAutomationStatus(message, color = '#909090') {
@@ -2431,6 +2444,7 @@
         autoTradeSide = payload.side === 'buy' ? 'buy' : 'sell';
         activeTradeExecutorMode = 'instant';
         forceSellBeforeStop = payload.forceSellBeforeStop !== false;
+        forceBuyAfterIgnoredSellFailure = false;
         oneClickTradeOpenAttempted = false;
         consecutiveTradeFailures = 0;
         lastSwapFormContainer = null;
@@ -2487,6 +2501,7 @@
         oneClickTradeOpenAttempted = false;
         consecutiveTradeFailures = 0;
         forceSellBeforeStop = false;
+        forceBuyAfterIgnoredSellFailure = false;
         autoTradeRecoveryReloads = 0;
         isAutoTradeReloading = false;
         activeTradeExecutorMode = 'instant';
@@ -2503,6 +2518,7 @@
         isAutoTrading = false;
         isAutoTradeReloading = false;
         forceSellBeforeStop = false;
+        forceBuyAfterIgnoredSellFailure = false;
         clearAutoTradeResumeState();
         if (autoTradeTimerId) {
             clearTimeout(autoTradeTimerId);
@@ -3467,7 +3483,9 @@
         const targetReached = !isTradeStatsPaused && getWeightedBoostProgressStats(targetVolumeStats).reached;
 
         // 达量后无论下一步原本是什么，都强制最终执行 100% 卖出，避免停在买入仓位。
-        const sideToRun = (targetReached || forceSellBeforeStop) ? 'sell' : autoTradeSide;
+        const resumeWithBuy = forceBuyAfterIgnoredSellFailure;
+        forceBuyAfterIgnoredSellFailure = false;
+        const sideToRun = resumeWithBuy ? 'buy' : ((targetReached || forceSellBeforeStop) ? 'sell' : autoTradeSide);
         const label = sideToRun === 'buy' ? '买入' : '卖出';
 
         if (targetReached) {
@@ -3511,6 +3529,17 @@
 
         if (sideToRun === 'sell' && !success && forceSellBeforeStop) {
             if (requestAutoTradePageReload('强制卖出未确认')) return;
+            if (ignoreSellFailureStopEnabled) {
+                forceSellBeforeStop = false;
+                forceBuyAfterIgnoredSellFailure = true;
+                consecutiveTradeFailures = 0;
+                autoTradeRecoveryReloads = 0;
+                clearAutoTradeResumeState();
+                autoTradeSide = 'buy';
+                updateAutoTradeStatus('已忽略卖出多次无反应，1 秒后继续买入', '#ff9800');
+                autoTradeTimerId = setTimeout(runAutoTradeLoop, TRADE_RETRY_COOLDOWN_MS);
+                return;
+            }
             stopAutoTrade('卖出多次无反应，请手动核对仓位');
             return;
         }
@@ -3780,7 +3809,7 @@
         const boostStatus = document.getElementById('boost-auto-status');
 
         return {
-            version: '1.2.14',
+            version: '1.2.15',
             ready: Boolean(calculatorPanelEl),
             legacyUserscriptDetected: hasVisibleLegacyUserscriptPanel(),
             url: window.location.href,
@@ -3796,6 +3825,7 @@
             controls: {
                 alarmEnabled: isAlarmEnabled,
                 tradeStatsPaused: isTradeStatsPaused,
+                ignoreSellFailureStopEnabled,
                 boostAutomationStatus: normalizeText(boostStatus && boostStatus.textContent)
             },
             settings: {
@@ -3890,6 +3920,9 @@
                 if (alarmCheckbox) alarmCheckbox.checked = isAlarmEnabled;
                 updateAlarmToggleState();
                 if (isAlarmEnabled) playAlertSound();
+                return { ok: true, state: getExtensionState() };
+            case 'set-ignore-sell-failure-stop':
+                setIgnoreSellFailureStopSetting(payload.enabled);
                 return { ok: true, state: getExtensionState() };
             case 'set-trade-stats-paused':
                 clearLegacyTradeStatsPauseSetting();

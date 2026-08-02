@@ -91,7 +91,7 @@
   function setBoostControlsReady(ready) {
     setDisabled([
       'auto-trade-button', 'refresh-button', 'schedule-button',
-      'alarm-toggle', 'rebate-percent', 'boost-daily',
+      'alarm-toggle', 'ignore-sell-failure-toggle', 'rebate-percent', 'boost-daily',
       'boost-multiplier', 'buy-option-index', 'schedule-minutes'
     ], !ready);
   }
@@ -262,6 +262,7 @@
       loadedBoostForm = true;
     }
     $('alarm-toggle').checked = Boolean(state.controls?.alarmEnabled);
+    $('ignore-sell-failure-toggle').checked = Boolean(state.controls?.ignoreSellFailureStopEnabled);
     $('automation-hint').textContent = state.controls?.boostAutomationStatus || '--';
     const scheduled = Number(state.auto?.scheduledRemainingMs) > 0;
     $('schedule-button').textContent = scheduled ? '取消定时' : '开始倒计时';
@@ -432,6 +433,9 @@
       sendBoost(scheduled ? 'cancel-schedule' : 'schedule-auto-trade', scheduled ? {} : { minutes: $('schedule-minutes').value });
     });
     $('alarm-toggle').addEventListener('change', (event) => sendBoost('set-alarm', { enabled: event.target.checked }));
+    $('ignore-sell-failure-toggle').addEventListener('change', (event) => {
+      sendBoost('set-ignore-sell-failure-stop', { enabled: event.target.checked });
+    });
     $('open-records-button').addEventListener('click', () => {
       chrome.runtime.sendMessage({ type: 'OKX_BOOST_OPEN_RECORDS' }).catch((error) => setFooter(friendlyError(error), true));
     });
