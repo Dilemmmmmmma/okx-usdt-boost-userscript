@@ -1,7 +1,7 @@
 (function() {
     'use strict';
 
-    const ENGINE_VERSION = '1.2.19';
+    const ENGINE_VERSION = '1.2.20';
     const ENGINE_RELOAD_MARKER = 'okx_boost_engine_reload_version';
 
     // The extension side panel owns the visible UI. This hidden compatibility
@@ -89,7 +89,7 @@
     const BOOST_RECORDS_PATH = '/priapi/v1/dapp/boost/records';
     const ORDER_HISTORY_PATH = '/priapi/v1/dx/trade/multi/v2/orderHistory';
     const ORDER_HISTORY_PAGE_SIZE = 20;
-    const ORDER_HISTORY_SELL_SYNC_DELAYS_MS = [1000, 2000, 4000, 8000, 12000];
+    const ORDER_HISTORY_BACKGROUND_SYNC_INITIAL_DELAY_MS = 1000;
     const ORDER_HISTORY_BACKGROUND_SYNC_INTERVAL_MS = 10000;
     const ORDER_HISTORY_BACKGROUND_SYNC_TIMEOUT_MS = 120000;
     const BOOST_MIN_BALANCE = 200;
@@ -2245,7 +2245,8 @@
             baselineStats: cloneStats(baselineStats || readOrderVolumeStats()),
             startedAt: Date.now(),
             attempts: 0,
-            lastError: ''
+            lastError: '',
+            fallbackClickUsed: false
         };
         calculateStats();
     }
@@ -2254,7 +2255,7 @@
         clearSellOrderSyncBackgroundTimer();
         pendingSellOrderSync = null;
         calculateStats();
-        updateAutoTradeStatus(message, color);
+        if (!isAutoTrading) updateAutoTradeStatus(message, color);
     }
 
     async function fetchOrderHistoryAndReadStats() {
@@ -2271,34 +2272,48 @@
 
         clearSellOrderSyncBackgroundTimer();
         if (!pendingSellOrderSync) return;
+        const syncState = pendingSellOrderSync;
 
         const run = async () => {
-            if (!pendingSellOrderSync) return;
+            sellOrderSyncBackgroundTimerId = null;
+            if (pendingSellOrderSync !== syncState) return;
 
-            if (Date.now() - pendingSellOrderSync.startedAt > ORDER_HISTORY_BACKGROUND_SYNC_TIMEOUT_MS) {
+            if (Date.now() - syncState.startedAt > ORDER_HISTORY_BACKGROUND_SYNC_TIMEOUT_MS) {
                 pendingSellOrderSync = null;
                 calculateStats();
-                updateAutoTradeStatus('订单历史同步超时，请手动核对', '#ff9800');
+                if (!isAutoTrading) {
+                    updateAutoTradeStatus('订单历史同步超时，请手动核对', '#ff9800');
+                } else {
+                    console.warn('[USDT计算器] 订单历史同步超时，交易主循环继续运行');
+                }
                 return;
             }
 
-            pendingSellOrderSync.attempts += 1;
+            syncState.attempts += 1;
+            calculateStats();
             try {
                 const latestStats = await fetchOrderHistoryAndReadStats();
-                if (!pendingSellOrderSync) return;
-                if (hasSellOrderSynced(latestStats, pendingSellOrderSync.baselineStats)) {
+                if (pendingSellOrderSync !== syncState) return;
+                if (hasSellOrderSynced(latestStats, syncState.baselineStats)) {
                     completePendingSellOrderSync('卖出订单后台同步完成', '#4caf50');
                     return;
                 }
             } catch (err) {
-                pendingSellOrderSync.lastError = err && err.message ? err.message : String(err);
+                if (pendingSellOrderSync !== syncState) return;
+                syncState.lastError = err && err.message ? err.message : String(err);
                 console.error('[USDT计算器] 后台同步卖出订单失败', err);
+                if (!syncState.fallbackClickUsed) {
+                    syncState.fallbackClickUsed = true;
+                    performRefreshClick();
+                }
             }
 
-            sellOrderSyncBackgroundTimerId = setTimeout(run, ORDER_HISTORY_BACKGROUND_SYNC_INTERVAL_MS);
+            if (pendingSellOrderSync === syncState) {
+                sellOrderSyncBackgroundTimerId = setTimeout(run, ORDER_HISTORY_BACKGROUND_SYNC_INTERVAL_MS);
+            }
         };
 
-        sellOrderSyncBackgroundTimerId = setTimeout(run, ORDER_HISTORY_BACKGROUND_SYNC_INTERVAL_MS);
+        sellOrderSyncBackgroundTimerId = setTimeout(run, ORDER_HISTORY_BACKGROUND_SYNC_INITIAL_DELAY_MS);
     }
 
     async function refreshOrderHistoryAfterConfirmedSell(beforeOrderStats, options = {}) {
@@ -2310,60 +2325,20 @@
         }
 
         const requireSellIncrease = options.requireSellIncrease !== false;
-        updateAutoTradeStatus('卖出已确认，同步订单历史', '#2196f3');
-
         if (!requireSellIncrease) {
-            try {
-                await fetchOrderHistoryByApi();
-            } catch (err) {
-                console.error('[USDT计算器] 主动同步订单历史失败，回退点击订单历史', err);
-                performRefreshClick();
-            }
-            calculateStats();
+            void fetchOrderHistoryByApi()
+                .then(() => calculateStats())
+                .catch((err) => {
+                    console.error('[USDT计算器] 后台刷新订单历史失败', err);
+                    performRefreshClick();
+                });
             return true;
         }
 
         beginPendingSellOrderSync(beforeOrderStats);
-        let fallbackClickUsed = false;
-
-        for (let i = 0; i < ORDER_HISTORY_SELL_SYNC_DELAYS_MS.length; i += 1) {
-            await sleep(ORDER_HISTORY_SELL_SYNC_DELAYS_MS[i]);
-            if (!pendingSellOrderSync) return true;
-
-            pendingSellOrderSync.attempts += 1;
-            updateAutoTradeStatus(`卖出已确认，等待订单历史同步 ${pendingSellOrderSync.attempts}`, '#2196f3');
-
-            try {
-                const latestStats = await fetchOrderHistoryAndReadStats();
-                if (!pendingSellOrderSync) return true;
-                if (hasSellOrderSynced(latestStats, pendingSellOrderSync.baselineStats)) {
-                    completePendingSellOrderSync('卖出订单已同步', '#4caf50');
-                    return true;
-                }
-            } catch (err) {
-                pendingSellOrderSync.lastError = err && err.message ? err.message : String(err);
-                console.error('[USDT计算器] 主动同步订单历史失败', err);
-
-                if (!fallbackClickUsed) {
-                    fallbackClickUsed = true;
-                    updateAutoTradeStatus('订单历史 API 失败，回退点击刷新', '#ff9800');
-                    performRefreshClick();
-                    await sleep(2500);
-                    const latestStats = readOrderVolumeStats();
-                    calculateStats();
-                    if (!pendingSellOrderSync) return true;
-                    if (hasSellOrderSynced(latestStats, pendingSellOrderSync.baselineStats)) {
-                        completePendingSellOrderSync('卖出订单已同步', '#4caf50');
-                        return true;
-                    }
-                }
-            }
-        }
-
-        updateAutoTradeStatus('卖出已确认，订单历史延迟，暂停自动交易', '#ff9800');
         startBackgroundSellOrderSync();
-        if (isAutoTrading) stopAutoTrade('卖出已确认，等待订单历史同步');
-        return false;
+        updateAutoTradeStatus('卖出已确认，订单历史将在后台同步', '#2196f3');
+        return true;
     }
 
     function updateAutoTradeStatus(message, color) {
