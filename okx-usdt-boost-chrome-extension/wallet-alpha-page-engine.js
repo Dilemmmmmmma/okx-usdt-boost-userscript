@@ -4,7 +4,7 @@
   if (window.__WALLET_ALPHA_EXTENSION_ENGINE__) return;
   window.__WALLET_ALPHA_EXTENSION_ENGINE__ = true;
 
-  const VERSION = '1.2.20';
+  const VERSION = '1.2.21';
   const CHANNEL_KEY = '__walletAlphaExtension';
   const TAG_API = '/bapi/defi/v1/public/wallet-direct/buw/wallet/dex/market/token/tag/info';
   const META_API = '/bapi/defi/v1/public/wallet-direct/buw/wallet/dex/market/token/meta/info';
@@ -17,6 +17,8 @@
   const INSUFFICIENT_BALANCE_RE = /余额不足|insufficient(?:\s+[A-Z0-9._-]+)?\s+balance/i;
   const SELL_BALANCE_RETRY_DELAY_MS = 1000;
   const MAX_SELL_BALANCE_RETRIES = 3;
+  const ORDER_RETRY_DELAY_MS = 1000;
+  const MAX_ORDER_RETRIES = 3;
 
   let settings = loadSettings();
   let token = readTokenFromUrl();
@@ -567,8 +569,24 @@
     return error;
   }
 
+  function tradeStepError(message, code, details = {}) {
+    const error = new Error(message);
+    error.code = code;
+    Object.assign(error, details);
+    return error;
+  }
+
+  function isRetryableOrderError(error) {
+    return error?.code === 'ORDER_FAILED' || error?.code === 'ORDER_NOT_CREATED' || error?.code === 'TRADE_UI_NOT_READY';
+  }
+
+  function shortErrorMessage(error) {
+    return String(error?.message || error || '未知错误').replace(/\s+/g, ' ').trim().slice(0, 90);
+  }
+
   async function waitForNewOrder(side, beforeIds, expectedTokenKey, timeoutMs, noticeBaseline = Infinity) {
     const deadline = Date.now() + timeoutMs;
+    let matchingOrderSeen = false;
     while (Date.now() < deadline) {
       if (!tokenUnchanged(expectedTokenKey)) throw new Error('页面代币已改变，交易已暂停');
       if (side === 'sell' && lastInsufficientBalanceNotice.sequence > noticeBaseline) throw insufficientBalanceError();
@@ -579,49 +597,123 @@
         if (tokenSymbol && !row.text.toUpperCase().includes(tokenSymbol.toUpperCase())) continue;
         const sideMatches = side === 'buy' ? BUY_RE.test(row.text) : SELL_RE.test(row.text);
         if (!sideMatches) continue;
+        matchingOrderSeen = true;
         const statusText = orderStatusText(row);
-        if (FAILURE_RE.test(statusText)) throw new Error(`${side === 'buy' ? '买入' : '卖出'}订单失败：${statusText.slice(0, 80)}`);
+        if (FAILURE_RE.test(statusText)) {
+          throw tradeStepError(
+            `${side === 'buy' ? '买入' : '卖出'}订单失败：${statusText.slice(0, 80)}`,
+            'ORDER_FAILED',
+            { orderId: row.id }
+          );
+        }
         if (SUCCESS_RE.test(statusText)) {
           return { row, usd: side === 'buy' ? extractBuyUsd(row) : null };
         }
       }
       await sleep(250);
     }
-    throw new Error(`${side === 'buy' ? '买入' : '卖出'}订单等待超时，未自动重试`);
+    throw tradeStepError(
+      matchingOrderSeen
+        ? `${side === 'buy' ? '买入' : '卖出'}订单已出现但未进入终态，为避免重复下单已暂停`
+        : `${side === 'buy' ? '买入' : '卖出'}订单等待超时，未发现新订单`,
+      matchingOrderSeen ? 'ORDER_PENDING_TIMEOUT' : 'ORDER_NOT_CREATED'
+    );
+  }
+
+  async function ensureTradeUiForRetry() {
+    try {
+      await ensureTradePanel();
+      await ensureOrderView();
+    } catch (error) {
+      throw tradeStepError(shortErrorMessage(error), 'TRADE_UI_NOT_READY');
+    }
+  }
+
+  async function executeBuy(sessionToken, expectedTokenKey) {
+    let retryCount = 0;
+
+    while (running && sessionToken === loopToken && !stopRequested) {
+      let beforeBuy = null;
+      try {
+        await ensureTradeUiForRetry();
+        phase = 'preparing-buy';
+        status = retryCount > 0 ? `准备重试买入 (${retryCount}/${MAX_ORDER_RETRIES})` : '准备买入';
+        postState();
+        await selectTab('BUY', '买入');
+        beforeBuy = await settledOrderIds();
+        const buyShortcut = findShortcut(settings.shortcutAmount, 'buy');
+        if (!buyShortcut) {
+          throw tradeStepError(`买入快捷值 ${normalizeShortcut(settings.shortcutAmount)} 未找到或不唯一`, 'TRADE_UI_NOT_READY');
+        }
+        if (!running || sessionToken !== loopToken || stopRequested) return null;
+        if (!tokenUnchanged(expectedTokenKey)) throw new Error('页面代币已改变，交易已暂停');
+        if (!clickElement(buyShortcut)) throw tradeStepError('买入快捷按钮点击失败', 'TRADE_UI_NOT_READY');
+        phase = 'waiting-buy';
+        status = retryCount > 0 ? `已重试买入，等待订单确认 (${retryCount}/${MAX_ORDER_RETRIES})` : '等待买入订单确认';
+        postState();
+        return await waitForNewOrder('buy', beforeBuy, expectedTokenKey, settings.orderTimeoutSec * 1000);
+      } catch (error) {
+        if (!isRetryableOrderError(error)) throw error;
+        if (retryCount >= MAX_ORDER_RETRIES) {
+          throw new Error(`买入已重试 ${MAX_ORDER_RETRIES} 次仍未成功：${shortErrorMessage(error)}`);
+        }
+        retryCount += 1;
+        phase = 'preparing-buy';
+        status = `买入未成功，1 秒后重试 (${retryCount}/${MAX_ORDER_RETRIES})：${shortErrorMessage(error)}`;
+        postState();
+        await sleep(ORDER_RETRY_DELAY_MS);
+      }
+    }
+
+    return null;
   }
 
   async function executeSell100(sessionToken, expectedTokenKey, preparingStatus = '准备卖出 100%') {
     phase = 'preparing-sell';
     status = preparingStatus;
     postState();
-    await selectTab('SELL', '卖出');
-    const beforeSell = await settledOrderIds();
     let balanceRetryCount = 0;
+    let orderRetryCount = 0;
 
     while (running && sessionToken === loopToken) {
-      const sellShortcut = findShortcut(100, 'sell');
-      if (!sellShortcut) throw new Error('卖出 100% 按钮未找到或不唯一');
-      if (!tokenUnchanged(expectedTokenKey)) throw new Error('页面代币已改变，交易已暂停');
-      const sellNoticeBaseline = lastInsufficientBalanceNotice.sequence;
-      clickElement(sellShortcut);
-      await sleep(50);
-      phase = 'waiting-sell';
-      status = balanceRetryCount > 0 ? `已重试卖出 100%，等待订单确认 (${balanceRetryCount}/${MAX_SELL_BALANCE_RETRIES})` : '等待卖出订单确认';
-      postState();
-
       try {
+        await ensureTradeUiForRetry();
+        await selectTab('SELL', '卖出');
+        const beforeSell = await settledOrderIds();
+        const sellShortcut = findShortcut(100, 'sell');
+        if (!sellShortcut) throw tradeStepError('卖出 100% 按钮未找到或不唯一', 'TRADE_UI_NOT_READY');
+        if (!tokenUnchanged(expectedTokenKey)) throw new Error('页面代币已改变，交易已暂停');
+        const sellNoticeBaseline = lastInsufficientBalanceNotice.sequence;
+        if (!clickElement(sellShortcut)) throw tradeStepError('卖出 100% 按钮点击失败', 'TRADE_UI_NOT_READY');
+        await sleep(50);
+        phase = 'waiting-sell';
+        const retryCount = Math.max(balanceRetryCount, orderRetryCount);
+        status = retryCount > 0 ? `已重试卖出 100%，等待订单确认 (${retryCount}/${MAX_ORDER_RETRIES})` : '等待卖出订单确认';
+        postState();
         await waitForNewOrder('sell', beforeSell, expectedTokenKey, settings.orderTimeoutSec * 1000, sellNoticeBaseline);
         return true;
       } catch (error) {
-        if (error?.code !== 'INSUFFICIENT_BALANCE') throw error;
-        balanceRetryCount += 1;
-        if (balanceRetryCount > MAX_SELL_BALANCE_RETRIES) {
-          throw new Error(`卖出重试 ${MAX_SELL_BALANCE_RETRIES} 次后仍提示余额不足，交易已暂停`);
+        if (error?.code === 'INSUFFICIENT_BALANCE') {
+          balanceRetryCount += 1;
+          if (balanceRetryCount > MAX_SELL_BALANCE_RETRIES) {
+            throw new Error(`卖出重试 ${MAX_SELL_BALANCE_RETRIES} 次后仍提示余额不足，交易已暂停`);
+          }
+          phase = 'preparing-sell';
+          status = `卖出余额尚未到账，1 秒后重试 100% (${balanceRetryCount}/${MAX_SELL_BALANCE_RETRIES})`;
+          postState();
+          await sleep(SELL_BALANCE_RETRY_DELAY_MS);
+          continue;
         }
+
+        if (!isRetryableOrderError(error)) throw error;
+        if (orderRetryCount >= MAX_ORDER_RETRIES) {
+          throw new Error(`卖出已重试 ${MAX_ORDER_RETRIES} 次仍未成功：${shortErrorMessage(error)}`);
+        }
+        orderRetryCount += 1;
         phase = 'preparing-sell';
-        status = `卖出余额尚未到账，1 秒后重试 100% (${balanceRetryCount}/${MAX_SELL_BALANCE_RETRIES})`;
+        status = `卖出未成功，1 秒后重试 (${orderRetryCount}/${MAX_ORDER_RETRIES})：${shortErrorMessage(error)}`;
         postState();
-        await sleep(SELL_BALANCE_RETRY_DELAY_MS);
+        await sleep(ORDER_RETRY_DELAY_MS);
       }
     }
     return false;
@@ -651,21 +743,8 @@
         }
         if (!tokenUnchanged(expectedTokenKey)) throw new Error('页面代币已改变，交易已暂停');
 
-        phase = 'preparing-buy';
-        status = '准备买入';
-        postState();
-        await selectTab('BUY', '买入');
-        const beforeBuy = await settledOrderIds();
-        const buyShortcut = findShortcut(settings.shortcutAmount, 'buy');
-        if (!buyShortcut) throw new Error(`买入快捷值 ${normalizeShortcut(settings.shortcutAmount)} 未找到或不唯一`);
-        if (!running || sessionToken !== loopToken || stopRequested) break;
-        if (!tokenUnchanged(expectedTokenKey)) throw new Error('页面代币已改变，交易已暂停');
-        clickElement(buyShortcut);
-        phase = 'waiting-buy';
-        status = '等待买入订单确认';
-        postState();
-
-        const buyOrder = await waitForNewOrder('buy', beforeBuy, expectedTokenKey, settings.orderTimeoutSec * 1000);
+        const buyOrder = await executeBuy(sessionToken, expectedTokenKey);
+        if (!buyOrder) break;
         const buyUsdAvailable = Number.isFinite(buyOrder.usd) && buyOrder.usd > 0;
         if (buyUsdAvailable) {
           progress.actualBuyUsd += buyOrder.usd;

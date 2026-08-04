@@ -1,7 +1,7 @@
 (function() {
     'use strict';
 
-    const ENGINE_VERSION = '1.2.20';
+    const ENGINE_VERSION = '1.2.21';
     const ENGINE_RELOAD_MARKER = 'okx_boost_engine_reload_version';
 
     // The extension side panel owns the visible UI. This hidden compatibility
