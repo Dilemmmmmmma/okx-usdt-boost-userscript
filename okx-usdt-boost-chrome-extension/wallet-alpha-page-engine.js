@@ -1,10 +1,10 @@
 (() => {
   'use strict';
 
-  const VERSION = '1.2.23';
+  const VERSION = '1.2.24';
   const CHANNEL_KEY = '__walletAlphaExtension';
   const ENGINE_RELOAD_MARKER = 'wallet_alpha_engine_reload_version';
-  const PROGRESS_SCHEMA_VERSION = 1;
+  const PROGRESS_SCHEMA_VERSION = 2;
 
   if (window.__WALLET_ALPHA_EXTENSION_ENGINE__) {
     const loadedVersion = String(window.__WALLET_ALPHA_EXTENSION_ENGINE_VERSION__ || 'legacy');
@@ -516,14 +516,29 @@
   }
 
   function orderRows() {
-    return Array.from(document.querySelectorAll('tr[data-row-key]')).map((row) => ({
-      id: String(row.getAttribute('data-row-key') || ''),
-      text: String(row.textContent || '').replace(/\s+/g, ' ').trim(),
-      cells: Array.from(row.querySelectorAll('td')).map((cell) => ({
-        text: String(cell.textContent || '').replace(/\s+/g, ' ').trim(),
-        label: String(cell.getAttribute('data-label') || cell.getAttribute('aria-label') || '').trim()
-      }))
-    })).filter((row) => row.id);
+    const rowsById = new Map();
+    for (const element of document.querySelectorAll('tr[data-row-key]')) {
+      const id = String(element.getAttribute('data-row-key') || '');
+      if (!id) continue;
+      const candidate = {
+        id,
+        visible: isVisible(element),
+        text: String(element.textContent || '').replace(/\s+/g, ' ').trim(),
+        cells: Array.from(element.querySelectorAll('td')).map((cell) => ({
+          text: String(cell.textContent || '').replace(/\s+/g, ' ').trim(),
+          label: String(cell.getAttribute('data-label') || cell.getAttribute('aria-label') || '').trim()
+        }))
+      };
+      const existing = rowsById.get(id);
+      if (
+        !existing
+        || (!existing.visible && candidate.visible)
+        || (existing.visible === candidate.visible && candidate.text.length > existing.text.length)
+      ) {
+        rowsById.set(id, candidate);
+      }
+    }
+    return Array.from(rowsById.values());
   }
 
   function orderIds() {
