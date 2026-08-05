@@ -1,10 +1,10 @@
 (() => {
   'use strict';
 
-  const VERSION = '1.2.24';
+  const VERSION = '1.2.25';
   const CHANNEL_KEY = '__walletAlphaExtension';
   const ENGINE_RELOAD_MARKER = 'wallet_alpha_engine_reload_version';
-  const PROGRESS_SCHEMA_VERSION = 2;
+  const PROGRESS_SCHEMA_VERSION = 3;
 
   if (window.__WALLET_ALPHA_EXTENSION_ENGINE__) {
     const loadedVersion = String(window.__WALLET_ALPHA_EXTENSION_ENGINE_VERSION__ || 'legacy');
@@ -311,7 +311,7 @@
 
   function state() {
     ensureCurrentProgressDay();
-    rebuildLegacyProgressFromVisibleOrders();
+    reconcileProgressFromVisibleOrders();
     const requiredActual = multiplier && settings.targetPoints > 0 ? settings.targetPoints / multiplier : null;
     const wearTrackedRounds = Number(progress.wearTrackedRounds) || 0;
     const rounds = Number(progress.rounds) || 0;
@@ -664,8 +664,9 @@
   }
 
   function orderTimestampMs(row) {
-    const match = String(row?.text || '').match(
-      /\b(20\d{2})[-/.](\d{1,2})[-/.](\d{1,2})\s+(\d{1,2}):(\d{2})(?::(\d{2}))?\b/
+    const source = [row?.text, ...(row?.cells || []).map((cell) => cell.text)].filter(Boolean).join(' ');
+    const match = source.match(
+      /\b(20\d{2})[-/.](\d{1,2})[-/.](\d{1,2})\s*T?\s*(\d{1,2}):(\d{2})(?::(\d{2}))?\b/
     );
     if (!match) return NaN;
     const timestamp = new Date(
@@ -679,36 +680,32 @@
     return Number.isFinite(timestamp) ? timestamp : NaN;
   }
 
-  function rebuildLegacyProgressFromVisibleOrders() {
+  function reconcileProgressFromVisibleOrders() {
     ensureCurrentProgressDay();
-    if ((Number(progress.schemaVersion) || 0) >= PROGRESS_SCHEMA_VERSION) return false;
     if (!(multiplier > 0) || !tokenSymbol) return false;
 
     const symbol = tokenSymbol.toUpperCase();
-    const parsedRows = orderRows()
-      .map((row, index) => {
-        const text = row.text.toUpperCase();
-        if (!text.includes(symbol) || !SUCCESS_RE.test(orderStatusText(row))) return null;
+    const tokenRows = orderRows()
+      .filter((row) => row.text.toUpperCase().includes(symbol))
+      .map((row, index) => ({ row, index, timestamp: orderTimestampMs(row) }));
+    const timestampedRows = tokenRows.filter((item) => Number.isFinite(item.timestamp));
+    if (!timestampedRows.length) return false;
+
+    const utcStart = Date.parse(`${utcDayKey()}T00:00:00Z`);
+    const rows = timestampedRows
+      .filter((item) => item.timestamp >= utcStart && item.timestamp < utcStart + 86400000)
+      .map(({ row, index, timestamp }) => {
+        if (!SUCCESS_RE.test(orderStatusText(row))) return null;
         const side = BUY_RE.test(row.text) ? 'buy' : SELL_RE.test(row.text) ? 'sell' : '';
         if (!side) return null;
         const usd = extractOrderUsd(row, settings.shortcutAmount);
         if (!Number.isFinite(usd) || usd <= 0) return null;
-        return { side, usd, timestamp: orderTimestampMs(row), index };
+        return { side, usd, timestamp, index };
       })
-      .filter(Boolean);
-    if (!parsedRows.length) return false;
-
-    const utcStart = Date.parse(`${utcDayKey()}T00:00:00Z`);
-    const timestampedRows = parsedRows.filter((row) => Number.isFinite(row.timestamp));
-    const rows = (timestampedRows.length ? timestampedRows.filter(
-      (row) => row.timestamp >= utcStart && row.timestamp < utcStart + 86400000
-    ) : parsedRows).sort((left, right) => {
-      if (Number.isFinite(left.timestamp) && Number.isFinite(right.timestamp) && left.timestamp !== right.timestamp) {
-        return left.timestamp - right.timestamp;
-      }
-      return right.index - left.index;
-    });
-    if (!rows.length) return false;
+      .filter(Boolean)
+      .sort((left, right) => left.timestamp !== right.timestamp
+        ? left.timestamp - right.timestamp
+        : right.index - left.index);
 
     const pendingBuys = [];
     let actualBuyUsd = 0;
@@ -727,7 +724,7 @@
       rounds += 1;
     }
 
-    progress = {
+    const nextProgress = {
       schemaVersion: PROGRESS_SCHEMA_VERSION,
       points: actualBuyUsd * multiplier,
       actualBuyUsd,
@@ -737,6 +734,12 @@
       rounds,
       updatedAt: Date.now()
     };
+    const unchanged = [
+      'schemaVersion', 'points', 'actualBuyUsd', 'wearBuyUsd',
+      'wearSellUsd', 'wearTrackedRounds', 'rounds'
+    ].every((key) => Number(progress[key]) === Number(nextProgress[key]));
+    if (unchanged) return false;
+    progress = nextProgress;
     saveProgress();
     return true;
   }
@@ -933,7 +936,7 @@
       if (isLoginRequired()) throw new Error('请先连接 Binance Wallet');
       await ensureTradePanel();
       await ensureOrderView();
-      if (rebuildLegacyProgressFromVisibleOrders()) {
+      if (reconcileProgressFromVisibleOrders()) {
         status = `已从今日订单重建 ${progress.rounds} 轮交易统计`;
         postState();
       }
