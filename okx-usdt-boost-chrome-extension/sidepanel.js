@@ -314,9 +314,13 @@
       setMetric('wallet-alpha-target', formatNumber(settings.targetPoints, 2));
       setMetric('wallet-alpha-required', stats.requiredActual === null ? '--' : formatNumber(stats.requiredActual, 2));
       setMetric('wallet-alpha-actual', formatNumber(stats.actualBuyUsd, 2), 'positive');
+      setMetric('wallet-alpha-wear', stats.dailyWear === null ? '--' : formatSigned(stats.dailyWear), toneForValue(stats.dailyWear));
+      $('wallet-alpha-wear').title = Number(stats.wearUntrackedRounds) > 0
+        ? `有 ${formatNumber(stats.wearUntrackedRounds, 0)} 轮交易缺少卖出回收额，当日磨损仅统计数据完整的轮次`
+        : '当日成功卖出回收额 - 对应买入额';
       setMetric('wallet-alpha-points', formatNumber(stats.points, 2), 'positive');
       setMetric('wallet-alpha-rounds', formatNumber(stats.rounds, 0));
-      $('alpha-mode-note').textContent = '积分交易量仅累计成功买入额 × Alpha 倍数；卖出用于回收仓位。';
+      $('alpha-mode-note').textContent = '积分交易量仅累计成功买入额 × Alpha 倍数；当日磨损=卖出回收额-买入额。';
     } else {
       $('alpha-token').textContent = state.token || '--';
       $('alpha-market-trend').textContent = [state.market?.range, state.market?.direction].filter(Boolean).join(' · ') || '--';

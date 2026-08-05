@@ -4,7 +4,7 @@
   if (window.__WALLET_ALPHA_EXTENSION_ENGINE__) return;
   window.__WALLET_ALPHA_EXTENSION_ENGINE__ = true;
 
-  const VERSION = '1.2.21';
+  const VERSION = '1.2.22';
   const CHANNEL_KEY = '__walletAlphaExtension';
   const TAG_API = '/bapi/defi/v1/public/wallet-direct/buw/wallet/dex/market/token/tag/info';
   const META_API = '/bapi/defi/v1/public/wallet-direct/buw/wallet/dex/market/token/meta/info';
@@ -31,6 +31,7 @@
   let status = '正在识别 Wallet Alpha 代币';
   let loopToken = 0;
   let visibleDialogBaseline = new Set();
+  let progressStorageKey = progressKey();
   let progress = loadProgress();
   let lastInsufficientBalanceNotice = { sequence: 0, text: '' };
 
@@ -119,7 +120,15 @@
   }
 
   function emptyProgress() {
-    return { points: 0, actualBuyUsd: 0, rounds: 0, updatedAt: 0 };
+    return {
+      points: 0,
+      actualBuyUsd: 0,
+      wearBuyUsd: 0,
+      wearSellUsd: 0,
+      wearTrackedRounds: 0,
+      rounds: 0,
+      updatedAt: 0
+    };
   }
 
   function loadProgress() {
@@ -128,6 +137,9 @@
       return {
         points: Number(parsed.points) || 0,
         actualBuyUsd: Number(parsed.actualBuyUsd) || 0,
+        wearBuyUsd: Number(parsed.wearBuyUsd) || 0,
+        wearSellUsd: Number(parsed.wearSellUsd) || 0,
+        wearTrackedRounds: Number(parsed.wearTrackedRounds) || 0,
         rounds: Number(parsed.rounds) || 0,
         updatedAt: Number(parsed.updatedAt) || 0
       };
@@ -137,8 +149,16 @@
   }
 
   function saveProgress() {
+    ensureCurrentProgressDay();
     progress.updatedAt = Date.now();
-    try { localStorage.setItem(progressKey(), JSON.stringify(progress)); } catch {}
+    try { localStorage.setItem(progressStorageKey, JSON.stringify(progress)); } catch {}
+  }
+
+  function ensureCurrentProgressDay() {
+    const currentKey = progressKey();
+    if (currentKey === progressStorageKey) return;
+    progressStorageKey = currentKey;
+    progress = loadProgress();
   }
 
   function positiveNumber(value, fallback, allowZero = false) {
@@ -244,7 +264,13 @@
   }
 
   function state() {
+    ensureCurrentProgressDay();
     const requiredActual = multiplier && settings.targetPoints > 0 ? settings.targetPoints / multiplier : null;
+    const wearTrackedRounds = Number(progress.wearTrackedRounds) || 0;
+    const rounds = Number(progress.rounds) || 0;
+    const dailyWear = wearTrackedRounds > 0
+      ? (Number(progress.wearSellUsd) || 0) - (Number(progress.wearBuyUsd) || 0)
+      : (rounds > 0 ? null : 0);
     return {
       version: VERSION,
       mode: 'wallet',
@@ -255,7 +281,12 @@
       status,
       token: token ? { ...token, symbol: tokenSymbol || token.address.slice(0, 8) } : null,
       market: { multiplier, multiplierSource },
-      stats: { ...progress, requiredActual },
+      stats: {
+        ...progress,
+        requiredActual,
+        dailyWear,
+        wearUntrackedRounds: Math.max(0, rounds - wearTrackedRounds)
+      },
       settings: { ...settings }
     };
   }
@@ -489,10 +520,33 @@
     return values.length ? values[0].number : NaN;
   }
 
-  function extractBuyUsd(row) {
+  function extractOrderUsd(row, expectedUsd = settings.shortcutAmount) {
     const symbol = String(tokenSymbol || '').trim();
     const marketPrice = readPageMarketPrice();
     const combined = [row.text, ...row.cells.map((cell) => `${cell.label} ${cell.text}`)].join(' ');
+    const stablecoinAmounts = [];
+    const stablecoinPatterns = [
+      /([+-]?\s*[0-9][0-9,.]*(?:\s*[KMB])?)\s*(?:USDT|USDC)\b/gi,
+      /\b(?:USDT|USDC)\s*([+-]?\s*[0-9][0-9,.]*(?:\s*[KMB])?)/gi
+    ];
+    for (const pattern of stablecoinPatterns) {
+      let stableMatch;
+      while ((stableMatch = pattern.exec(combined))) {
+        const value = Math.abs(compactNumber(stableMatch[1]));
+        if (Number.isFinite(value) && value > 0) stablecoinAmounts.push(value);
+      }
+    }
+    if (stablecoinAmounts.length) {
+      const expected = Number(expectedUsd);
+      const uniqueAmounts = Array.from(new Set(stablecoinAmounts));
+      if (Number.isFinite(expected) && expected > 0) {
+        uniqueAmounts.sort((a, b) => Math.abs(a - expected) - Math.abs(b - expected));
+      } else {
+        uniqueAmounts.sort((a, b) => b - a);
+      }
+      return uniqueAmounts[0];
+    }
+
     let quantity = NaN;
 
     if (symbol) {
@@ -509,14 +563,14 @@
     }
 
     if (!Number.isFinite(quantity) && Number.isFinite(marketPrice)) {
-      const expectedUsd = settings.shortcutAmount;
+      const expectedAmount = Number(expectedUsd) || settings.shortcutAmount;
       const numericCandidates = [];
       for (const cell of row.cells) {
         if (/时间|time|状态|status|价格|price/i.test(cell.label)) continue;
         const number = compactNumber(cell.text.replace(/\$/g, ''));
         if (!Number.isFinite(number) || number <= 0) continue;
         const usd = number * marketPrice;
-        if (usd >= expectedUsd * 0.2 && usd <= expectedUsd * 5) numericCandidates.push({ number, distance: Math.abs(usd - expectedUsd) });
+        if (usd >= expectedAmount * 0.2 && usd <= expectedAmount * 5) numericCandidates.push({ number, distance: Math.abs(usd - expectedAmount) });
       }
       numericCandidates.sort((a, b) => a.distance - b.distance);
       if (numericCandidates.length) quantity = numericCandidates[0].number;
@@ -584,7 +638,7 @@
     return String(error?.message || error || '未知错误').replace(/\s+/g, ' ').trim().slice(0, 90);
   }
 
-  async function waitForNewOrder(side, beforeIds, expectedTokenKey, timeoutMs, noticeBaseline = Infinity) {
+  async function waitForNewOrder(side, beforeIds, expectedTokenKey, timeoutMs, noticeBaseline = Infinity, expectedUsd = settings.shortcutAmount) {
     const deadline = Date.now() + timeoutMs;
     let matchingOrderSeen = false;
     while (Date.now() < deadline) {
@@ -607,7 +661,7 @@
           );
         }
         if (SUCCESS_RE.test(statusText)) {
-          return { row, usd: side === 'buy' ? extractBuyUsd(row) : null };
+          return { row, usd: extractOrderUsd(row, expectedUsd) };
         }
       }
       await sleep(250);
@@ -668,7 +722,7 @@
     return null;
   }
 
-  async function executeSell100(sessionToken, expectedTokenKey, preparingStatus = '准备卖出 100%') {
+  async function executeSell100(sessionToken, expectedTokenKey, preparingStatus = '准备卖出 100%', expectedSellUsd = settings.shortcutAmount) {
     phase = 'preparing-sell';
     status = preparingStatus;
     postState();
@@ -690,8 +744,14 @@
         const retryCount = Math.max(balanceRetryCount, orderRetryCount);
         status = retryCount > 0 ? `已重试卖出 100%，等待订单确认 (${retryCount}/${MAX_ORDER_RETRIES})` : '等待卖出订单确认';
         postState();
-        await waitForNewOrder('sell', beforeSell, expectedTokenKey, settings.orderTimeoutSec * 1000, sellNoticeBaseline);
-        return true;
+        return await waitForNewOrder(
+          'sell',
+          beforeSell,
+          expectedTokenKey,
+          settings.orderTimeoutSec * 1000,
+          sellNoticeBaseline,
+          expectedSellUsd
+        );
       } catch (error) {
         if (error?.code === 'INSUFFICIENT_BALANCE') {
           balanceRetryCount += 1;
@@ -736,6 +796,7 @@
       visibleDialogBaseline = new Set(dialogElements());
 
       while (running && sessionToken === loopToken) {
+        ensureCurrentProgressDay();
         if (stopRequested) break;
         if (progress.points >= settings.targetPoints) {
           status = '已达到目标积分交易量';
@@ -745,6 +806,7 @@
 
         const buyOrder = await executeBuy(sessionToken, expectedTokenKey);
         if (!buyOrder) break;
+        ensureCurrentProgressDay();
         const buyUsdAvailable = Number.isFinite(buyOrder.usd) && buyOrder.usd > 0;
         if (buyUsdAvailable) {
           progress.actualBuyUsd += buyOrder.usd;
@@ -753,10 +815,22 @@
           postState();
         }
 
-        const sold = await executeSell100(sessionToken, expectedTokenKey, '买入成功，准备卖出 100%');
-        if (!sold) break;
+        const sellOrder = await executeSell100(
+          sessionToken,
+          expectedTokenKey,
+          '买入成功，准备卖出 100%',
+          buyUsdAvailable ? buyOrder.usd : settings.shortcutAmount
+        );
+        if (!sellOrder) break;
+        ensureCurrentProgressDay();
+        const sellUsdAvailable = Number.isFinite(sellOrder.usd) && sellOrder.usd > 0;
 
         progress.rounds += 1;
+        if (buyUsdAvailable && sellUsdAvailable) {
+          progress.wearBuyUsd += buyOrder.usd;
+          progress.wearSellUsd += sellOrder.usd;
+          progress.wearTrackedRounds += 1;
+        }
         saveProgress();
         if (!buyUsdAvailable) throw new Error('买卖已完成，但无法从买入订单计算美元交易额，交易已暂停');
         phase = 'idle';
@@ -853,6 +927,7 @@
       const current = readTokenFromUrl();
       if (running && (!current || tokenKey(current) !== tokenKey(token))) pauseWithError('页面代币已改变，交易已暂停');
       token = current;
+      progressStorageKey = progressKey();
       progress = loadProgress();
       refreshTokenInfo();
     }
