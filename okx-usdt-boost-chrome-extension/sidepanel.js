@@ -287,8 +287,10 @@
     const stats = state.stats || {};
     const settings = state.settings || {};
     const legacy = Boolean(state.legacyUserscriptDetected);
-    const ready = Boolean(state.ready) && !legacy;
     const isWallet = state.mode === 'wallet';
+    const engineVersionCurrent = state.version === EXTENSION_VERSION;
+    const walletEngineUsable = !isWallet || engineVersionCurrent || Boolean(state.running);
+    const ready = Boolean(state.ready) && !legacy && walletEngineUsable;
     const formKind = isWallet ? 'alpha-wallet' : 'alpha-cex';
     const formState = alphaFormStates[formKind];
 
@@ -354,7 +356,19 @@
       }
       formState.loaded = true;
     }
-    if (activeWorkspace === 'alpha') setFooter(legacy ? '请停用旧 Alpha 篡改猴脚本后再启动扩展' : state.running ? `${isWallet ? 'Wallet ' : ''}Alpha 自动交易运行中` : `${isWallet ? 'Wallet ' : ''}Alpha 工作台已就绪`, legacy);
+    if (activeWorkspace === 'alpha') {
+      const walletVersionMessage = state.running
+        ? `Wallet 页面引擎仍为 ${state.version || '旧版'}，停止交易后会自动刷新升级`
+        : `Wallet 页面引擎仍为 ${state.version || '旧版'}，正在加载 ${EXTENSION_VERSION}`;
+      const footerMessage = legacy
+        ? '请停用旧 Alpha 篡改猴脚本后再启动扩展'
+        : isWallet && !engineVersionCurrent
+          ? walletVersionMessage
+          : state.running
+            ? `${isWallet ? 'Wallet ' : ''}Alpha 自动交易运行中`
+            : `${isWallet ? 'Wallet ' : ''}Alpha 工作台已就绪`;
+      setFooter(footerMessage, legacy || (isWallet && !engineVersionCurrent));
+    }
   }
 
   async function sendToEngine(type, command, payload = {}, quiet = false, renderResponse = true) {

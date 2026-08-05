@@ -1,11 +1,55 @@
 (() => {
   'use strict';
 
-  if (window.__WALLET_ALPHA_EXTENSION_ENGINE__) return;
-  window.__WALLET_ALPHA_EXTENSION_ENGINE__ = true;
-
-  const VERSION = '1.2.22';
+  const VERSION = '1.2.23';
   const CHANNEL_KEY = '__walletAlphaExtension';
+  const ENGINE_RELOAD_MARKER = 'wallet_alpha_engine_reload_version';
+  const PROGRESS_SCHEMA_VERSION = 1;
+
+  if (window.__WALLET_ALPHA_EXTENSION_ENGINE__) {
+    const loadedVersion = String(window.__WALLET_ALPHA_EXTENSION_ENGINE_VERSION__ || 'legacy');
+    if (
+      loadedVersion !== VERSION
+      && window.__WALLET_ALPHA_EXTENSION_UPGRADE_WATCHER__ !== VERSION
+    ) {
+      window.__WALLET_ALPHA_EXTENSION_UPGRADE_WATCHER__ = VERSION;
+      let requestSequence = 0;
+
+      const requestOldEngineState = () => {
+        const id = `wallet-alpha-upgrade-${Date.now()}-${++requestSequence}`;
+        window.postMessage({
+          [CHANNEL_KEY]: true,
+          kind: 'command',
+          id,
+          command: 'wallet-alpha-get-state',
+          payload: {}
+        }, window.location.origin);
+      };
+
+      const onOldEngineState = (event) => {
+        if (event.source !== window || event.origin !== window.location.origin) return;
+        const data = event.data;
+        if (
+          !data
+          || data[CHANNEL_KEY] !== true
+          || data.kind !== 'response'
+          || !String(data.payload?.id || '').startsWith('wallet-alpha-upgrade-')
+        ) return;
+        if (data.payload?.state?.running) return;
+        if (window.sessionStorage.getItem(ENGINE_RELOAD_MARKER) === VERSION) return;
+        window.sessionStorage.setItem(ENGINE_RELOAD_MARKER, VERSION);
+        window.location.reload();
+      };
+
+      window.addEventListener('message', onOldEngineState);
+      requestOldEngineState();
+      window.setInterval(requestOldEngineState, 2000);
+    }
+    return;
+  }
+  window.__WALLET_ALPHA_EXTENSION_ENGINE__ = true;
+  window.__WALLET_ALPHA_EXTENSION_ENGINE_VERSION__ = VERSION;
+  window.sessionStorage.removeItem(ENGINE_RELOAD_MARKER);
   const TAG_API = '/bapi/defi/v1/public/wallet-direct/buw/wallet/dex/market/token/tag/info';
   const META_API = '/bapi/defi/v1/public/wallet-direct/buw/wallet/dex/market/token/meta/info';
   const DEFAULT_SETTINGS = Object.freeze({ targetPoints: 0, shortcutAmount: 20, orderTimeoutSec: 90 });
@@ -121,6 +165,7 @@
 
   function emptyProgress() {
     return {
+      schemaVersion: PROGRESS_SCHEMA_VERSION,
       points: 0,
       actualBuyUsd: 0,
       wearBuyUsd: 0,
@@ -135,6 +180,7 @@
     try {
       const parsed = JSON.parse(localStorage.getItem(progressKey()) || '{}');
       return {
+        schemaVersion: Number(parsed.schemaVersion) || 0,
         points: Number(parsed.points) || 0,
         actualBuyUsd: Number(parsed.actualBuyUsd) || 0,
         wearBuyUsd: Number(parsed.wearBuyUsd) || 0,
@@ -265,6 +311,7 @@
 
   function state() {
     ensureCurrentProgressDay();
+    rebuildLegacyProgressFromVisibleOrders();
     const requiredActual = multiplier && settings.targetPoints > 0 ? settings.targetPoints / multiplier : null;
     const wearTrackedRounds = Number(progress.wearTrackedRounds) || 0;
     const rounds = Number(progress.rounds) || 0;
@@ -601,6 +648,84 @@
     return Number.isFinite(usd) && usd > 0 ? usd : NaN;
   }
 
+  function orderTimestampMs(row) {
+    const match = String(row?.text || '').match(
+      /\b(20\d{2})[-/.](\d{1,2})[-/.](\d{1,2})\s+(\d{1,2}):(\d{2})(?::(\d{2}))?\b/
+    );
+    if (!match) return NaN;
+    const timestamp = new Date(
+      Number(match[1]),
+      Number(match[2]) - 1,
+      Number(match[3]),
+      Number(match[4]),
+      Number(match[5]),
+      Number(match[6] || 0)
+    ).getTime();
+    return Number.isFinite(timestamp) ? timestamp : NaN;
+  }
+
+  function rebuildLegacyProgressFromVisibleOrders() {
+    ensureCurrentProgressDay();
+    if ((Number(progress.schemaVersion) || 0) >= PROGRESS_SCHEMA_VERSION) return false;
+    if (!(multiplier > 0) || !tokenSymbol) return false;
+
+    const symbol = tokenSymbol.toUpperCase();
+    const parsedRows = orderRows()
+      .map((row, index) => {
+        const text = row.text.toUpperCase();
+        if (!text.includes(symbol) || !SUCCESS_RE.test(orderStatusText(row))) return null;
+        const side = BUY_RE.test(row.text) ? 'buy' : SELL_RE.test(row.text) ? 'sell' : '';
+        if (!side) return null;
+        const usd = extractOrderUsd(row, settings.shortcutAmount);
+        if (!Number.isFinite(usd) || usd <= 0) return null;
+        return { side, usd, timestamp: orderTimestampMs(row), index };
+      })
+      .filter(Boolean);
+    if (!parsedRows.length) return false;
+
+    const utcStart = Date.parse(`${utcDayKey()}T00:00:00Z`);
+    const timestampedRows = parsedRows.filter((row) => Number.isFinite(row.timestamp));
+    const rows = (timestampedRows.length ? timestampedRows.filter(
+      (row) => row.timestamp >= utcStart && row.timestamp < utcStart + 86400000
+    ) : parsedRows).sort((left, right) => {
+      if (Number.isFinite(left.timestamp) && Number.isFinite(right.timestamp) && left.timestamp !== right.timestamp) {
+        return left.timestamp - right.timestamp;
+      }
+      return right.index - left.index;
+    });
+    if (!rows.length) return false;
+
+    const pendingBuys = [];
+    let actualBuyUsd = 0;
+    let wearBuyUsd = 0;
+    let wearSellUsd = 0;
+    let rounds = 0;
+    for (const row of rows) {
+      if (row.side === 'buy') {
+        actualBuyUsd += row.usd;
+        pendingBuys.push(row.usd);
+        continue;
+      }
+      if (!pendingBuys.length) continue;
+      wearBuyUsd += pendingBuys.shift();
+      wearSellUsd += row.usd;
+      rounds += 1;
+    }
+
+    progress = {
+      schemaVersion: PROGRESS_SCHEMA_VERSION,
+      points: actualBuyUsd * multiplier,
+      actualBuyUsd,
+      wearBuyUsd,
+      wearSellUsd,
+      wearTrackedRounds: rounds,
+      rounds,
+      updatedAt: Date.now()
+    };
+    saveProgress();
+    return true;
+  }
+
   function dialogElements() {
     return visibleElements('[role="dialog"], .bn-modal');
   }
@@ -793,6 +918,10 @@
       if (isLoginRequired()) throw new Error('请先连接 Binance Wallet');
       await ensureTradePanel();
       await ensureOrderView();
+      if (rebuildLegacyProgressFromVisibleOrders()) {
+        status = `已从今日订单重建 ${progress.rounds} 轮交易统计`;
+        postState();
+      }
       visibleDialogBaseline = new Set(dialogElements());
 
       while (running && sessionToken === loopToken) {
