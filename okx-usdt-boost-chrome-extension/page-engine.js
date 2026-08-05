@@ -1,28 +1,23 @@
 (function() {
     'use strict';
 
-    const ENGINE_VERSION = '1.2.25';
-    const ENGINE_RELOAD_MARKER = 'okx_boost_engine_reload_version';
+    const ENGINE_VERSION = '1.2.26';
 
     // The extension side panel owns the visible UI. This hidden compatibility
     // tree lets the previously proven page-trading engine keep its DOM contract.
     if (window.__OKX_USDT_BOOST_CHROME_ENGINE__) {
         const loadedVersion = String(window.__OKX_USDT_BOOST_CHROME_ENGINE_VERSION__ || 'legacy');
         if (loadedVersion !== ENGINE_VERSION) {
-            let oldEngineRunning = false;
-            try {
-                oldEngineRunning = Boolean(window.OKX_USDT_DEBUG && window.OKX_USDT_DEBUG().isAutoTrading);
-            } catch {}
-            if (!oldEngineRunning && window.sessionStorage.getItem(ENGINE_RELOAD_MARKER) !== ENGINE_VERSION) {
-                window.sessionStorage.setItem(ENGINE_RELOAD_MARKER, ENGINE_VERSION);
-                window.location.reload();
-            }
+            window.__OKX_USDT_BOOST_CHROME_ENGINE_VERSION_CONFLICT__ = {
+                loadedVersion,
+                requestedVersion: ENGINE_VERSION,
+                detectedAt: Date.now()
+            };
         }
         return;
     }
     window.__OKX_USDT_BOOST_CHROME_ENGINE__ = true;
     window.__OKX_USDT_BOOST_CHROME_ENGINE_VERSION__ = ENGINE_VERSION;
-    window.sessionStorage.removeItem(ENGINE_RELOAD_MARKER);
 
     const ordersMap = new Map();
     let dailyOrderRecordsMap = new Map();

@@ -1,55 +1,23 @@
 (() => {
   'use strict';
 
-  const VERSION = '1.2.25';
+  const VERSION = '1.2.26';
   const CHANNEL_KEY = '__walletAlphaExtension';
-  const ENGINE_RELOAD_MARKER = 'wallet_alpha_engine_reload_version';
   const PROGRESS_SCHEMA_VERSION = 3;
 
   if (window.__WALLET_ALPHA_EXTENSION_ENGINE__) {
     const loadedVersion = String(window.__WALLET_ALPHA_EXTENSION_ENGINE_VERSION__ || 'legacy');
-    if (
-      loadedVersion !== VERSION
-      && window.__WALLET_ALPHA_EXTENSION_UPGRADE_WATCHER__ !== VERSION
-    ) {
-      window.__WALLET_ALPHA_EXTENSION_UPGRADE_WATCHER__ = VERSION;
-      let requestSequence = 0;
-
-      const requestOldEngineState = () => {
-        const id = `wallet-alpha-upgrade-${Date.now()}-${++requestSequence}`;
-        window.postMessage({
-          [CHANNEL_KEY]: true,
-          kind: 'command',
-          id,
-          command: 'wallet-alpha-get-state',
-          payload: {}
-        }, window.location.origin);
+    if (loadedVersion !== VERSION) {
+      window.__WALLET_ALPHA_EXTENSION_VERSION_CONFLICT__ = {
+        loadedVersion,
+        requestedVersion: VERSION,
+        detectedAt: Date.now()
       };
-
-      const onOldEngineState = (event) => {
-        if (event.source !== window || event.origin !== window.location.origin) return;
-        const data = event.data;
-        if (
-          !data
-          || data[CHANNEL_KEY] !== true
-          || data.kind !== 'response'
-          || !String(data.payload?.id || '').startsWith('wallet-alpha-upgrade-')
-        ) return;
-        if (data.payload?.state?.running) return;
-        if (window.sessionStorage.getItem(ENGINE_RELOAD_MARKER) === VERSION) return;
-        window.sessionStorage.setItem(ENGINE_RELOAD_MARKER, VERSION);
-        window.location.reload();
-      };
-
-      window.addEventListener('message', onOldEngineState);
-      requestOldEngineState();
-      window.setInterval(requestOldEngineState, 2000);
     }
     return;
   }
   window.__WALLET_ALPHA_EXTENSION_ENGINE__ = true;
   window.__WALLET_ALPHA_EXTENSION_ENGINE_VERSION__ = VERSION;
-  window.sessionStorage.removeItem(ENGINE_RELOAD_MARKER);
   const TAG_API = '/bapi/defi/v1/public/wallet-direct/buw/wallet/dex/market/token/tag/info';
   const META_API = '/bapi/defi/v1/public/wallet-direct/buw/wallet/dex/market/token/meta/info';
   const DEFAULT_SETTINGS = Object.freeze({ targetPoints: 0, shortcutAmount: 20, orderTimeoutSec: 90 });

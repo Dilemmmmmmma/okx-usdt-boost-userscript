@@ -272,8 +272,8 @@
     $('schedule-status').textContent = scheduled ? `将在 ${Math.ceil(state.auto.scheduledRemainingMs / 1000)} 秒后启动` : '定时启动未设置';
     if (activeWorkspace === 'boost') {
       const versionMessage = state.auto?.running
-        ? `页面引擎仍为 ${state.version || '旧版'}，请先停止交易再刷新页面`
-        : `页面引擎仍为 ${state.version || '旧版'}，正在加载 ${EXTENSION_VERSION}`;
+        ? `页面仍在运行 ${state.version || '旧版'} 引擎，请先停止交易`
+        : '检测到 OKX 页面引擎版本冲突，请停用旧版扩展或脚本后手动刷新页面';
       setFooter(
         legacy ? '请停用旧篡改猴脚本，避免两个交易引擎同时运行' : (engineVersionCurrent ? state.auto?.status || '准备就绪' : versionMessage),
         legacy || !engineVersionCurrent
@@ -358,8 +358,8 @@
     }
     if (activeWorkspace === 'alpha') {
       const walletVersionMessage = state.running
-        ? `Wallet 页面引擎仍为 ${state.version || '旧版'}，停止交易后会自动刷新升级`
-        : `Wallet 页面引擎仍为 ${state.version || '旧版'}，正在加载 ${EXTENSION_VERSION}`;
+        ? `Wallet 页面仍在运行 ${state.version || '旧版'} 引擎，请先停止交易`
+        : `检测到 Wallet 页面引擎版本冲突，请停用旧版扩展或脚本后手动刷新页面`;
       const footerMessage = legacy
         ? '请停用旧 Alpha 篡改猴脚本后再启动扩展'
         : isWallet && !engineVersionCurrent
